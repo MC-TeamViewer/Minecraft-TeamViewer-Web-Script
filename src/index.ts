@@ -30,6 +30,7 @@ import {
   buildCommandPlayerMarkClearAll,
   buildCommandPlayerMarkSet,
   buildCommandSameServerFilterSet,
+  buildCommandTacticalWaypointDelete,
   buildCommandTacticalWaypointSet,
 } from './network/networkSchemas';
 import { createAdminWsClient } from './network/wsClient';
@@ -353,6 +354,14 @@ declare const unsafeWindow: Window | undefined;
         roomCode: CONFIG.ROOM_CODE,
         dimension: CONFIG.TARGET_DIMENSION,
       }));
+      if (ok) {
+        lastErrorText = null;
+        updateUiStatus();
+      }
+      return ok;
+    },
+    onDeleteTacticalWaypoint: ({ waypointId }) => {
+      const ok = sendAdminCommand(buildCommandTacticalWaypointDelete(waypointId));
       if (ok) {
         lastErrorText = null;
         updateUiStatus();

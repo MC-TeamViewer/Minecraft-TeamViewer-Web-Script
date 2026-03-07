@@ -198,6 +198,11 @@ export type CommandTacticalWaypointSetPacket = {
   dimension: string;
 };
 
+export type WaypointsDeletePacket = {
+  type: 'waypoints_delete';
+  waypointIds: string[];
+};
+
 export type AdminOutboundPacket =
   | AdminHandshakePacket
   | AdminResyncRequestPacket
@@ -205,7 +210,8 @@ export type AdminOutboundPacket =
   | CommandPlayerMarkClearPacket
   | CommandPlayerMarkClearAllPacket
   | CommandSameServerFilterSetPacket
-  | CommandTacticalWaypointSetPacket;
+  | CommandTacticalWaypointSetPacket
+  | WaypointsDeletePacket;
 
 export type AdminAckInboundPacket = {
   type: 'admin_ack';
@@ -348,6 +354,13 @@ export function buildCommandTacticalWaypointSet(payload: {
     permanent: payload.permanent,
     roomCode: normalizeRoomCode(payload.roomCode),
     dimension: normalizeDimension(payload.dimension) || 'minecraft:overworld',
+  };
+}
+
+export function buildCommandTacticalWaypointDelete(waypointId: string): WaypointsDeletePacket {
+  return {
+    type: 'waypoints_delete',
+    waypointIds: [String(waypointId || '').trim()].filter(Boolean),
   };
 }
 

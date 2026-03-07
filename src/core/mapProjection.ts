@@ -28,6 +28,9 @@ type MapProjectionDeps = {
     ttlSeconds: number | null;
     permanent: boolean;
   }) => boolean;
+  onDeleteTacticalWaypoint?: (payload: {
+    waypointId: string;
+  }) => boolean;
 };
 
 export function createMapProjection(deps: MapProjectionDeps) {
@@ -186,6 +189,37 @@ export function createMapProjection(deps: MapProjectionDeps) {
     };
   }
 
+  function bindFloatingMenuInteractions(menu: HTMLElement) {
+    menu.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
+    menu.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    menu.addEventListener('wheel', (e) => {
+      e.stopPropagation();
+    });
+    menu.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+
+  function positionFloatingMenu(menu: HTMLElement, event: MouseEvent) {
+    const margin = 12;
+    const menuRect = menu.getBoundingClientRect();
+    let left = event.clientX + 14;
+    let top = event.clientY + 12;
+
+    const maxLeft = Math.max(margin, window.innerWidth - menuRect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - menuRect.height - margin);
+    left = Math.max(margin, Math.min(maxLeft, left));
+    top = Math.max(margin, Math.min(maxTop, top));
+
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
   function openTacticalMenuAtPointer(
     map: any,
     event: MouseEvent,
@@ -254,19 +288,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       syncPreviewFromSelection();
     });
 
-    menu.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-    });
-    menu.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-    menu.addEventListener('wheel', (e) => {
-      e.stopPropagation();
-    });
-    menu.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    }, true);
+    bindFloatingMenuInteractions(menu);
 
     ttlSelect.addEventListener('change', () => {
       customRow.style.display = ttlSelect.value === 'custom' ? 'flex' : 'none';
@@ -303,19 +325,75 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     document.body.appendChild(menu);
     tacticalMenuEl = menu;
+    positionFloatingMenu(menu, event);
 
-    const margin = 12;
-    const menuRect = menu.getBoundingClientRect();
-    let left = event.clientX + 14;
-    let top = event.clientY + 12;
+    tacticalMenuOutsideClickHandler = (e: MouseEvent) => {
+      const target = e.target;
+      if (tacticalMenuEl && target instanceof Node && tacticalMenuEl.contains(target)) {
+        return;
+      }
+      closeTacticalMenu();
+    };
+    tacticalMenuEscHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeTacticalMenu();
+      }
+    };
 
-    const maxLeft = Math.max(margin, window.innerWidth - menuRect.width - margin);
-    const maxTop = Math.max(margin, window.innerHeight - menuRect.height - margin);
-    left = Math.max(margin, Math.min(maxLeft, left));
-    top = Math.max(margin, Math.min(maxTop, top));
+    setTimeout(() => {
+      if (tacticalMenuOutsideClickHandler) {
+        document.addEventListener('mousedown', tacticalMenuOutsideClickHandler, true);
+      }
+      if (tacticalMenuEscHandler) {
+        document.addEventListener('keydown', tacticalMenuEscHandler, true);
+      }
+    }, 0);
 
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.top = `${Math.round(top)}px`;
+    return true;
+  }
+
+  function openWaypointDeleteMenuAtPointer(event: MouseEvent, waypointId: string, waypointLabel: string | null) {
+    closeTacticalMenu();
+
+    const menu = document.createElement('div');
+    menu.className = 'nodemc-tactical-menu';
+    menu.innerHTML = `
+      <div class="nmc-tactical-title">删除战术标点</div>
+      <label class="nmc-tactical-row">
+        <span>目标标点</span>
+        <input class="nmc-tactical-delete-label" type="text" readonly value="${escapeHtml(waypointLabel || waypointId)}" />
+      </label>
+      <div class="nmc-tactical-row">
+        <span>确认删除这个 waypoint 吗？</span>
+      </div>
+      <div class="nmc-tactical-actions">
+        <button type="button" class="nmc-tactical-confirm">确认删除</button>
+        <button type="button" class="nmc-tactical-cancel">取消</button>
+      </div>
+    `;
+
+    const confirmBtn = menu.querySelector('.nmc-tactical-confirm') as HTMLButtonElement | null;
+    const cancelBtn = menu.querySelector('.nmc-tactical-cancel') as HTMLButtonElement | null;
+    if (!confirmBtn || !cancelBtn) {
+      return false;
+    }
+
+    bindFloatingMenuInteractions(menu);
+
+    cancelBtn.addEventListener('click', () => {
+      closeTacticalMenu();
+    });
+
+    confirmBtn.addEventListener('click', () => {
+      if (typeof deps.onDeleteTacticalWaypoint === 'function') {
+        deps.onDeleteTacticalWaypoint({ waypointId });
+      }
+      closeTacticalMenu();
+    });
+
+    document.body.appendChild(menu);
+    tacticalMenuEl = menu;
+    positionFloatingMenu(menu, event);
 
     tacticalMenuOutsideClickHandler = (e: MouseEvent) => {
       const target = e.target;
@@ -358,6 +436,28 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return openTacticalMenuAtPointer(map, event, pos);
   }
 
+  function maybeHandleWaypointDelete(event: MouseEvent, waypointId: string, waypointLabel: string | null) {
+    if (!shouldBlockMapLeftRightClick()) return false;
+    if (!shouldEnableTacticalMapMarking()) return false;
+    if (event.button !== 2) return false;
+    if (typeof deps.onDeleteTacticalWaypoint !== 'function') return false;
+
+    const id = String(waypointId || '').trim();
+    if (!id) return false;
+
+    return openWaypointDeleteMenuAtPointer(event, id, waypointLabel);
+  }
+
+  function findWaypointTargetInfo(target: EventTarget | null) {
+    if (!(target instanceof Element)) return null;
+    const anchor = target.closest('[data-nodemc-waypoint-id]');
+    if (!(anchor instanceof HTMLElement)) return null;
+    const waypointId = String(anchor.dataset.nodemcWaypointId || '').trim();
+    if (!waypointId) return null;
+    const waypointLabel = String(anchor.dataset.nodemcWaypointLabel || '').trim() || null;
+    return { waypointId, waypointLabel };
+  }
+
   function shouldBlockMapLeftRightClick() {
     return Boolean(CONFIG.BLOCK_MAP_LEFT_RIGHT_CLICK);
   }
@@ -381,6 +481,15 @@ export function createMapProjection(deps: MapProjectionDeps) {
   function onGuardedMouseEvent(event: Event) {
     const mouseEvent = event as MouseEvent;
     if (!shouldInterceptMouseEvent(mouseEvent)) return;
+    const waypointTarget = findWaypointTargetInfo(mouseEvent.target);
+    if (waypointTarget && maybeHandleWaypointDelete(mouseEvent, waypointTarget.waypointId, waypointTarget.waypointLabel)) {
+      mouseEvent.preventDefault();
+      mouseEvent.stopPropagation();
+      if (typeof mouseEvent.stopImmediatePropagation === 'function') {
+        mouseEvent.stopImmediatePropagation();
+      }
+      return;
+    }
     maybeHandleTacticalMarkPlacement(mouseEvent);
     mouseEvent.preventDefault();
     mouseEvent.stopPropagation();
@@ -1008,7 +1117,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
       ? `<span class="n-waypoint-icon" style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);background:${color};width:${visual.iconSize}px;height:${visual.iconSize}px;display:inline-block;border-radius:50%;line-height:${visual.iconSize}px;text-align:center;font-size:${Math.max(10, Math.round(visual.iconSize * 0.7))}px;z-index:2;">📍</span>`
       : '';
 
-    return `<div class="nodemc-waypoint-anchor" style="position:relative;display:inline-block;white-space:nowrap;">${textHtml}${iconHtml}</div>`;
+    const safeWaypointId = escapeHtml(String(waypoint && (waypoint.id || waypoint.waypointId) || ''));
+    const safeWaypointLabel = escapeHtml(safeName);
+    return `<div class="nodemc-waypoint-anchor" data-nodemc-waypoint-id="${safeWaypointId}" data-nodemc-waypoint-label="${safeWaypointLabel}" style="position:relative;display:inline-block;white-space:nowrap;">${textHtml}${iconHtml}</div>`;
   }
 
   function upsertWaypoint(map: any, waypointId: string, payload: any) {
@@ -1045,7 +1156,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const marker = leafletRef.marker(latLng, {
       icon: leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] }),
       zIndexOffset,
-      interactive: false,
+      interactive: true,
       keyboard: false,
     });
 
@@ -1300,6 +1411,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
         nextWaypointIds.add(String(wpId));
         upsertWaypoint(map, String(wpId), {
+          id: String(wpId),
           x: resolvedPos.x,
           z: resolvedPos.z,
           label: (data as any).label || (data as any).name || (data as any).title || String(wpId),
