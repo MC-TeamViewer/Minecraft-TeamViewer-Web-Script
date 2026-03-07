@@ -6,7 +6,7 @@ vars:
 
 tasks:
 
-  build-monkey-versioned:
+  build:
     desc: Build tampermonkey script and output versioned userscript file
     cmds:
       - pnpm install

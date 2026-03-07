@@ -731,12 +731,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
   function buildChunkCircleCellsLatLngs(map: any, centerX: number, centerZ: number, chunkRadius: number) {
     const cx = Math.floor(centerX / 16);
     const cz = Math.floor(centerZ / 16);
-    const radiusSq = chunkRadius * chunkRadius;
+    const radius = chunkRadius;
     const cells: any[] = [];
 
     for (let dx = -chunkRadius; dx <= chunkRadius; dx += 1) {
       for (let dz = -chunkRadius; dz <= chunkRadius; dz += 1) {
-        if ((dx * dx) + (dz * dz) > radiusSq) continue;
+        // Use Chebyshev distance (max(|dx|, |dz|)) so the area is a square of chunks
+        // around the center chunk, matching chunk-distance semantics.
+        if (Math.max(Math.abs(dx), Math.abs(dz)) > radius) continue;
 
         const chunkX = cx + dx;
         const chunkZ = cz + dz;

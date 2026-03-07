@@ -382,7 +382,7 @@ function closeHelp() {
       </div>
       <div class="n-row">
         <label>区块半径 l（按玩家所在区块向外）</label>
-        <input v-model="state.form.REPORTER_CHUNK_RADIUS" @input="markDisplayInputsDirty" id="nodemc-overlay-reporter-chunk-radius" type="number" min="0" max="64" step="1" />
+        <input v-model="state.form.REPORTER_CHUNK_RADIUS" @input="markDisplayInputsDirty" id="nodemc-overlay-reporter-chunk-radius" type="number" min="1" max="64" step="1" />
       </div>
       <div class="n-row">
         <label>区块范围颜色（#RRGGBB，留空跟随阵营色）</label>
