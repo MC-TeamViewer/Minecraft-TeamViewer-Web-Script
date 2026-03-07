@@ -906,13 +906,13 @@ export function createMapProjection(deps: MapProjectionDeps) {
       ? `<span class="n-ride"> · 🐎</span>`
       : '';
     const visual = getMarkerVisualConfig(markerKind);
-    const useReporterStar = markerKind === 'player' && isReporter && Boolean(CONFIG.REPORTER_STAR_ICON);
-    const iconSize = useReporterStar ? Math.max(18, visual.iconSize + 10) : visual.iconSize;
+    const useReporterHighlight = markerKind === 'player' && isReporter && Boolean(CONFIG.REPORTER_STAR_ICON);
+    const iconSize = useReporterHighlight ? Math.max(15, visual.iconSize + 3) : visual.iconSize;
 
-    const iconContent = markerKind === 'horse' ? '🐎' : (useReporterStar ? '★' : '');
-    const iconExtraClass = useReporterStar ? ' is-reporter-star' : '';
-    const iconVisualStyle = useReporterStar
-      ? `background:transparent;border:none;color:${color};box-shadow:none;text-shadow:0 0 8px ${color}99,0 0 2px rgba(15,23,42,.8);`
+    const iconContent = markerKind === 'horse' ? '🐎' : '';
+    const iconExtraClass = useReporterHighlight ? ' is-reporter-highlight' : '';
+    const iconVisualStyle = useReporterHighlight
+      ? `--reporter-accent-color:${color};background:${color};border:2px solid rgba(255,255,255,0.98);box-shadow:0 0 0 1px rgba(15,23,42,.88),0 0 0 3px ${color}42;`
       : `background:${markerKind === 'horse' ? 'rgba(15,23,42,.92)' : color};box-shadow:0 0 0 2px ${color}55,0 0 0 1px rgba(15,23,42,.95) inset;`;
     const iconHtml = showIcon
       ? `<span class="n-icon ${markerKind === 'horse' ? 'is-horse' : ''}${iconExtraClass}" style="${iconVisualStyle}width:${iconSize}px;height:${iconSize}px;line-height:${iconSize}px;font-size:${Math.max(9, Math.round(iconSize * 0.75))}px;">${iconContent}</span>`
@@ -1106,20 +1106,20 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (!showIcon && !showText) return '';
 
     const ownerHtml = owner ? `<span class="n-wp-owner" style="font-weight:600;display:inline-block;margin-right:6px;">${escapeHtml(String(owner))}</span>` : '';
-    const paddingLeft = showIcon ? Math.max(0, Math.round(visual.iconSize / 2) + 6) : 0;
     const textBg = 'background:rgba(255,255,255,0.85);color:#0f172a;padding:4px 6px;border-radius:6px;display:inline-block;';
+    const labelOffset = showIcon ? Math.max(0, Math.round(visual.iconSize / 2) + 6) : 0;
 
     const textHtml = showText
-      ? `<span class="n-waypoint-label" style="direction:ltr;white-space:nowrap;padding-left:${paddingLeft}px;${textBg};font-size:${visual.textSize}px;">${ownerHtml}${escapeHtml(safeName)}</span>`
+      ? `<span class="n-waypoint-label" data-align="${showIcon ? 'with-icon' : 'left-anchor'}" style="direction:ltr;white-space:nowrap;left:${labelOffset}px;${textBg};font-size:${visual.textSize}px;">${ownerHtml}${escapeHtml(safeName)}</span>`
       : '';
 
     const iconHtml = showIcon
-      ? `<span class="n-waypoint-icon" style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);background:${color};width:${visual.iconSize}px;height:${visual.iconSize}px;display:inline-block;border-radius:50%;line-height:${visual.iconSize}px;text-align:center;font-size:${Math.max(10, Math.round(visual.iconSize * 0.7))}px;z-index:2;">📍</span>`
+      ? `<span class="n-waypoint-icon" style="background:${color};width:${visual.iconSize}px;height:${visual.iconSize}px;line-height:${visual.iconSize}px;font-size:${Math.max(10, Math.round(visual.iconSize * 0.7))}px;z-index:2;">📍</span>`
       : '';
 
     const safeWaypointId = escapeHtml(String(waypoint && (waypoint.id || waypoint.waypointId) || ''));
     const safeWaypointLabel = escapeHtml(safeName);
-    return `<div class="nodemc-waypoint-anchor" data-nodemc-waypoint-id="${safeWaypointId}" data-nodemc-waypoint-label="${safeWaypointLabel}" style="position:relative;display:inline-block;white-space:nowrap;">${textHtml}${iconHtml}</div>`;
+    return `<div class="nodemc-waypoint-anchor" data-nodemc-waypoint-id="${safeWaypointId}" data-nodemc-waypoint-label="${safeWaypointLabel}">${iconHtml}${textHtml}</div>`;
   }
 
   function upsertWaypoint(map: any, waypointId: string, payload: any) {

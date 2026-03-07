@@ -41,7 +41,7 @@ type SettingsUiDeps = {
   getPlayerOptionColor?: (item: PlayerOption) => string | null;
 };
 
-type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection';
+type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection' | 'help';
 
 type OverlayFormState = {
   ADMIN_WS_URL: string;
@@ -66,11 +66,10 @@ type OverlayFormState = {
   REPORTER_STAR_ICON: boolean;
   REPORTER_VISION_CIRCLE_ENABLED: boolean;
   REPORTER_VISION_RADIUS: string;
-  REPORTER_VISION_COLOR: string;
+  REPORTER_EFFECT_COLOR: string;
   REPORTER_VISION_OPACITY: string;
   REPORTER_CHUNK_AREA_ENABLED: boolean;
   REPORTER_CHUNK_RADIUS: string;
-  REPORTER_CHUNK_COLOR: string;
   REPORTER_CHUNK_OPACITY: string;
   AUTO_TEAM_FROM_NAME: boolean;
   FRIENDLY_TAGS: string;
@@ -107,11 +106,10 @@ function createDefaultFormState(): OverlayFormState {
     REPORTER_STAR_ICON: true,
     REPORTER_VISION_CIRCLE_ENABLED: false,
     REPORTER_VISION_RADIUS: '64',
-    REPORTER_VISION_COLOR: '',
+    REPORTER_EFFECT_COLOR: '',
     REPORTER_VISION_OPACITY: '0.1',
     REPORTER_CHUNK_AREA_ENABLED: false,
     REPORTER_CHUNK_RADIUS: '2',
-    REPORTER_CHUNK_COLOR: '',
     REPORTER_CHUNK_OPACITY: '0.11',
     AUTO_TEAM_FROM_NAME: true,
     FRIENDLY_TAGS: '',
@@ -137,6 +135,15 @@ export function createSettingsUi(deps: SettingsUiDeps) {
   const state = reactive({
     page: 'main' as UiPage,
     statusText: '',
+    overview: {
+      wsConnected: false,
+      hasError: false,
+      markerCount: 0,
+      onlinePlayerCount: 0,
+      mapPlayerCount: 0,
+      roomCode: 'default',
+      targetDimension: 'minecraft:overworld',
+    },
     dirty: {
       mainText: false,
       connection: false,
@@ -414,8 +421,22 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     return Boolean(byId('nodemc-overlay-panel'));
   }
 
-  function updateStatus(text: string) {
+  function updateStatus(
+    text: string,
+    overviewPatch?: Partial<{
+      wsConnected: boolean;
+      hasError: boolean;
+      markerCount: number;
+      onlinePlayerCount: number;
+      mapPlayerCount: number;
+      roomCode: string;
+      targetDimension: string;
+    }>,
+  ) {
     state.statusText = text;
+    if (overviewPatch && typeof overviewPatch === 'object') {
+      Object.assign(state.overview, overviewPatch);
+    }
   }
 
   function fillFormFromConfig(config: Record<string, any>, getConfiguredTeamColor: (team: string) => string) {
@@ -423,6 +444,8 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.form.ROOM_CODE = String(config.ROOM_CODE ?? '');
     state.form.RECONNECT_INTERVAL_MS = String(config.RECONNECT_INTERVAL_MS ?? '1000');
     state.form.TARGET_DIMENSION = String(config.TARGET_DIMENSION ?? 'minecraft:overworld');
+    state.overview.roomCode = state.form.ROOM_CODE || 'default';
+    state.overview.targetDimension = state.form.TARGET_DIMENSION || 'minecraft:overworld';
     state.form.SHOW_PLAYER_ICON = Boolean(config.SHOW_PLAYER_ICON);
     state.form.SHOW_PLAYER_TEXT = Boolean(config.SHOW_PLAYER_TEXT);
     state.form.SHOW_HORSE_TEXT = Boolean(config.SHOW_HORSE_TEXT);
@@ -441,11 +464,10 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.form.REPORTER_STAR_ICON = Boolean(config.REPORTER_STAR_ICON);
     state.form.REPORTER_VISION_CIRCLE_ENABLED = Boolean(config.REPORTER_VISION_CIRCLE_ENABLED);
     state.form.REPORTER_VISION_RADIUS = String(config.REPORTER_VISION_RADIUS ?? 64);
-    state.form.REPORTER_VISION_COLOR = String(config.REPORTER_VISION_COLOR ?? '');
+    state.form.REPORTER_EFFECT_COLOR = String(config.REPORTER_VISION_COLOR ?? config.REPORTER_CHUNK_COLOR ?? '');
     state.form.REPORTER_VISION_OPACITY = String(config.REPORTER_VISION_OPACITY ?? 0.1);
     state.form.REPORTER_CHUNK_AREA_ENABLED = Boolean(config.REPORTER_CHUNK_AREA_ENABLED);
     state.form.REPORTER_CHUNK_RADIUS = String(config.REPORTER_CHUNK_RADIUS ?? 2);
-    state.form.REPORTER_CHUNK_COLOR = String(config.REPORTER_CHUNK_COLOR ?? '');
     state.form.REPORTER_CHUNK_OPACITY = String(config.REPORTER_CHUNK_OPACITY ?? 0.11);
     state.form.AUTO_TEAM_FROM_NAME = Boolean(config.AUTO_TEAM_FROM_NAME);
     state.form.SHOW_WAYPOINT_ICON = Boolean(config.SHOW_WAYPOINT_ICON);
@@ -487,11 +509,11 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       REPORTER_STAR_ICON: state.form.REPORTER_STAR_ICON,
       REPORTER_VISION_CIRCLE_ENABLED: state.form.REPORTER_VISION_CIRCLE_ENABLED,
       REPORTER_VISION_RADIUS: state.form.REPORTER_VISION_RADIUS || config.REPORTER_VISION_RADIUS,
-      REPORTER_VISION_COLOR: state.form.REPORTER_VISION_COLOR,
+      REPORTER_VISION_COLOR: state.form.REPORTER_EFFECT_COLOR,
       REPORTER_VISION_OPACITY: state.form.REPORTER_VISION_OPACITY || config.REPORTER_VISION_OPACITY,
       REPORTER_CHUNK_AREA_ENABLED: state.form.REPORTER_CHUNK_AREA_ENABLED,
       REPORTER_CHUNK_RADIUS: state.form.REPORTER_CHUNK_RADIUS || config.REPORTER_CHUNK_RADIUS,
-      REPORTER_CHUNK_COLOR: state.form.REPORTER_CHUNK_COLOR,
+      REPORTER_CHUNK_COLOR: state.form.REPORTER_EFFECT_COLOR,
       REPORTER_CHUNK_OPACITY: state.form.REPORTER_CHUNK_OPACITY || config.REPORTER_CHUNK_OPACITY,
       AUTO_TEAM_FROM_NAME: state.form.AUTO_TEAM_FROM_NAME,
       FRIENDLY_TAGS: state.form.FRIENDLY_TAGS,
@@ -508,6 +530,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
   function refreshPlayerSelector(players: PlayerOption[]) {
     const previous = state.selectedPlayerId;
     state.players = Array.isArray(players) ? players : [];
+    state.overview.onlinePlayerCount = state.players.length;
     if (previous && state.players.some((item) => item.playerId === previous)) {
       state.selectedPlayerId = previous;
       return;
@@ -521,6 +544,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
 
   function refreshMapPlayerList(players: MapPlayerListItem[]) {
     state.mapPlayers = Array.isArray(players) ? players : [];
+    state.overview.mapPlayerCount = state.mapPlayers.length;
     if (state.playerListVisible && state.mapPlayers.length <= 0) {
       state.playerListVisible = false;
     }

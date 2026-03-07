@@ -46,7 +46,7 @@ export const UI_STYLE_TEXT = `
     position: fixed;
     right: 18px;
     bottom: 160px;
-    width: 350px;
+    width: 390px;
     max-width: calc(100vw - 20px);
     max-height: min(82vh, 760px);
     overflow: auto;
@@ -77,27 +77,45 @@ export const UI_STYLE_TEXT = `
     background: rgba(148, 163, 184, 0.45);
     border-radius: 999px;
   }
-  #nodemc-overlay-panel .n-title {
-    font-weight: 700;
-    margin-bottom: 2px;
-    cursor: move;
-    user-select: none;
-    letter-spacing: 0.2px;
-    font-size: 13px;
-  }
   #nodemc-overlay-panel .n-header {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-bottom: 10px;
-    padding: 9px 10px;
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(191, 219, 254, 0.82), rgba(219, 234, 254, 0.62));
-    border: 1px solid var(--nmc-border-soft);
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(59, 130, 246, 0.24);
+    background:
+      radial-gradient(circle at top right, rgba(96, 165, 250, 0.34), transparent 34%),
+      linear-gradient(145deg, rgba(239, 246, 255, 0.95), rgba(219, 234, 254, 0.72));
+    cursor: move;
+    user-select: none;
   }
-  #nodemc-overlay-panel .n-header-hint {
-    color: var(--nmc-text-muted);
-    font-size: 11px;
+  #nodemc-overlay-panel .n-header-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  #nodemc-overlay-panel .n-primary-tabs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  #nodemc-overlay-panel .n-tab-btn {
+    border: 1px solid rgba(147, 197, 253, 0.55);
+    background: rgba(255, 255, 255, 0.62);
+    color: #1e3a8a;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-weight: 700;
+    box-shadow: none;
+  }
+  #nodemc-overlay-panel .n-tab-btn.active {
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.95), rgba(37, 99, 235, 0.95));
+    color: #eff6ff;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
   }
   #nodemc-overlay-panel .n-page {
     display: none;
@@ -152,6 +170,10 @@ export const UI_STYLE_TEXT = `
   #nodemc-overlay-panel .n-card .n-btns,
   #nodemc-overlay-panel .n-card .n-nav-row,
   #nodemc-overlay-panel .n-card .n-player-list-popup {
+    grid-column: 1 / -1;
+  }
+  #nodemc-overlay-panel .n-card .full-width,
+  #nodemc-overlay-panel .full-width {
     grid-column: 1 / -1;
   }
   /* allow checks to be full width when needed via .full-width */
@@ -231,6 +253,183 @@ export const UI_STYLE_TEXT = `
     gap: 8px;
     margin-top: 10px;
     flex-wrap: wrap;
+  }
+  #nodemc-overlay-panel .n-eyebrow {
+    color: #2563eb;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  #nodemc-overlay-panel .n-hero-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.1;
+    margin-bottom: 5px;
+  }
+  #nodemc-overlay-panel .n-hero-text {
+    color: #334155;
+    line-height: 1.45;
+  }
+  #nodemc-overlay-panel .n-status-pill,
+  #nodemc-overlay-panel .n-inline-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  #nodemc-overlay-panel .n-status-pill.is-ok {
+    color: #166534;
+    background: rgba(187, 247, 208, 0.9);
+    border-color: rgba(34, 197, 94, 0.35);
+  }
+  #nodemc-overlay-panel .n-status-pill.is-error {
+    color: #991b1b;
+    background: rgba(254, 226, 226, 0.95);
+    border-color: rgba(239, 68, 68, 0.35);
+  }
+  #nodemc-overlay-panel .n-status-pill.is-idle,
+  #nodemc-overlay-panel .n-inline-pill.is-warning {
+    color: #92400e;
+    background: rgba(254, 243, 199, 0.95);
+    border-color: rgba(245, 158, 11, 0.35);
+  }
+  #nodemc-overlay-panel .n-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  #nodemc-overlay-panel .n-metric-card {
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(255, 255, 255, 0.72);
+  }
+  #nodemc-overlay-panel .n-metric-label {
+    color: #64748b;
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+  #nodemc-overlay-panel .n-metric-value {
+    color: #0f172a;
+    font-size: 17px;
+    font-weight: 800;
+  }
+  #nodemc-overlay-panel .n-overview-card {
+    margin-bottom: 12px;
+  }
+  #nodemc-overlay-panel .n-section-header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 2px;
+  }
+  #nodemc-overlay-panel .n-quick-grid {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #nodemc-overlay-panel .n-quick-action {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 72px;
+    text-align: left;
+  }
+  #nodemc-overlay-panel .n-quick-action span {
+    font-weight: 800;
+  }
+  #nodemc-overlay-panel .n-quick-action small {
+    color: #475569;
+    line-height: 1.4;
+  }
+  #nodemc-overlay-panel .n-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  #nodemc-overlay-panel .n-chip-btn {
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(255, 255, 255, 0.82);
+    color: #1e293b;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-weight: 700;
+    box-shadow: none;
+  }
+  #nodemc-overlay-panel .n-chip-btn.active {
+    background: rgba(219, 234, 254, 0.96);
+    border-color: rgba(59, 130, 246, 0.38);
+    color: #1d4ed8;
+  }
+  #nodemc-overlay-panel .n-segmented {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #nodemc-overlay-panel .n-segment-btn {
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.86);
+    color: #1e293b;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+  }
+  #nodemc-overlay-panel .n-segment-btn.active.is-friendly {
+    background: rgba(219, 234, 254, 0.95);
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.42);
+  }
+  #nodemc-overlay-panel .n-segment-btn.active.is-neutral {
+    background: rgba(226, 232, 240, 0.95);
+    color: #334155;
+    border-color: rgba(100, 116, 139, 0.32);
+  }
+  #nodemc-overlay-panel .n-segment-btn.active.is-enemy {
+    background: rgba(254, 226, 226, 0.95);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.4);
+  }
+  #nodemc-overlay-panel .n-selected-player-card {
+    padding: 10px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(219, 234, 254, 0.82));
+    border: 1px solid rgba(59, 130, 246, 0.2);
+  }
+  #nodemc-overlay-panel .n-selected-player-name {
+    color: #0f172a;
+    font-weight: 800;
+  }
+  #nodemc-overlay-panel .n-selected-player-meta {
+    margin-top: 4px;
+    color: #475569;
+    line-height: 1.4;
+  }
+  #nodemc-overlay-panel .n-color-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #nodemc-overlay-panel .n-color-swatch {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  }
+  #nodemc-overlay-panel .n-color-input-wrap input {
+    flex: 1;
   }
   #nodemc-overlay-panel .n-config-menu {
     margin-top: 8px;
@@ -328,6 +527,7 @@ export const UI_STYLE_TEXT = `
     overflow: auto;
   }
   #nodemc-overlay-panel .n-help-content {
+    grid-column: 1 / -1;
     padding: 10px;
     color: var(--nmc-text-main);
     line-height: 1.5;
@@ -395,17 +595,6 @@ export const UI_STYLE_TEXT = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  #nodemc-overlay-status {
-    margin-top: 10px;
-    color: var(--nmc-text-subtle);
-    word-break: break-word;
-    font-size: 11px;
-    line-height: 1.45;
-    padding: 8px 9px;
-    border-radius: 8px;
-    border: 1px dashed var(--nmc-border-soft);
-    background: rgba(239, 246, 255, 0.85);
-  }
   #nodemc-overlay-panel .n-subtitle {
     margin-top: 0;
     margin-bottom: 6px;
@@ -425,10 +614,21 @@ export const UI_STYLE_TEXT = `
   }
   @media (max-width: 430px) {
     #nodemc-overlay-panel {
-      width: min(350px, calc(100vw - 12px));
+      width: min(390px, calc(100vw - 12px));
       max-height: 78vh;
       padding: 10px;
       border-radius: 12px;
+    }
+    #nodemc-overlay-panel .n-primary-tabs,
+    #nodemc-overlay-panel .n-metric-grid,
+    #nodemc-overlay-panel .n-quick-grid,
+    #nodemc-overlay-panel .n-segmented {
+      grid-template-columns: 1fr;
+    }
+    #nodemc-overlay-panel .n-header-top,
+    #nodemc-overlay-panel .n-section-header {
+      flex-direction: column;
+      align-items: flex-start;
     }
     #nodemc-overlay-panel .n-btns button {
       flex: 1;
@@ -484,18 +684,25 @@ export const OVERLAY_STYLE_TEXT = `
     line-height: 14px;
     text-align: center;
   }
-  .nodemc-player-anchor .n-icon.is-reporter-star {
-    font-weight: 900;
-    text-align: center;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    letter-spacing: -0.4px;
-    -webkit-text-stroke: 1.8px rgba(255, 255, 255, 0.98);
-    paint-order: stroke fill;
-    text-shadow:
-      0 0 1px rgba(15, 23, 42, 0.85),
-      0 0 5px rgba(15, 23, 42, 0.55);
+  .nodemc-player-anchor .n-icon.is-reporter-highlight {
+    overflow: visible;
+  }
+  .nodemc-player-anchor .n-icon.is-reporter-highlight::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border: 1.5px solid rgba(255, 255, 255, 0.98);
+    border-radius: 4px;
+    transform: rotate(45deg);
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.82), 0 0 6px var(--reporter-accent-color, rgba(59, 130, 246, 0.7));
+  }
+  .nodemc-player-anchor .n-icon.is-reporter-highlight::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.68);
   }
   .nodemc-player-anchor .n-label {
     position: absolute;
@@ -518,6 +725,29 @@ export const OVERLAY_STYLE_TEXT = `
   }
   .nodemc-player-anchor .n-team {
     font-weight: 700;
+  }
+  .nodemc-waypoint-anchor {
+    position: relative;
+    width: 0;
+    height: 0;
+    pointer-events: auto;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .nodemc-waypoint-anchor .n-waypoint-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    display: inline-block;
+    border-radius: 50%;
+    text-align: center;
+  }
+  .nodemc-waypoint-anchor .n-waypoint-label {
+    position: absolute;
+    top: 0;
+    transform: translateY(-50%);
   }
   .nodemc-tactical-anchor {
     position: relative;

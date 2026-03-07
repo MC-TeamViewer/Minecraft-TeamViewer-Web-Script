@@ -474,9 +474,16 @@ declare const unsafeWindow: Window | undefined;
     const mapCounts = mapProjection.getCounts();
     const lastErr = lastErrorText ? `错误: ${lastErrorText}` : '正常';
     const wsText = wsConnected ? '已连接' : '未连接';
-    const players = mapCounts.markers;
+    const annotations = mapCounts.markers + mapCounts.waypoints;
     const serverFilterText = sameServerFilterEnabled ? '同服过滤:开' : '同服过滤:关';
-    settingsUi.updateStatus(`状态: ${lastErr} | WS: ${wsText} | 标记: ${players} | ${serverFilterText}`);
+    settingsUi.updateStatus(`状态: ${lastErr} | WS: ${wsText} | 标注: ${annotations} | ${serverFilterText}`,
+      {
+        wsConnected,
+        hasError: Boolean(lastErrorText),
+        markerCount: annotations,
+        roomCode: CONFIG.ROOM_CODE,
+        targetDimension: CONFIG.TARGET_DIMENSION,
+      });
   }
 
   function resolvePlayerIdFromInput() {
