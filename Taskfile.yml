@@ -1,0 +1,17 @@
+version: '3'
+
+vars:
+  MONKEY_VERSION:
+    sh: python3 -c "import json;print(json.load(open('./package.json', encoding='utf-8'))['version'])"
+
+tasks:
+
+  build-monkey-versioned:
+    desc: Build tampermonkey script and output versioned userscript file
+    cmds:
+      - pnpm install
+      - pnpm run build
+      - mkdir -p ./build-artifacts
+      - |
+        script_file=$(ls dist/*.user.js | head -n 1)
+        cp "$script_file" "./build-artifacts/tampermonkey-script-v{{.MONKEY_VERSION}}.user.js"
