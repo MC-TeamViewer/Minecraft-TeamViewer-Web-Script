@@ -117,12 +117,16 @@ declare const unsafeWindow: Window | undefined;
         const displayNameRaw = String(node.displayName || '').trim();
         const name = String(node.name || '').trim();
         const parsedDisplay = parseMcDisplayName(displayNameRaw || prefixedName);
+        const teamText = parsedDisplay.teamText || (prefixedName ? `[${prefixedName}]` : '');
 
         return {
           name,
-          teamText: parsedDisplay.teamText,
+          teamText,
           teamColor: parsedDisplay.color,
           autoName: prefixedName || parsedDisplay.plain || name || null,
+          displayNameRaw,
+          prefixedName,
+          matchedBy: 'uuid',
         };
       }
     }
@@ -668,6 +672,7 @@ declare const unsafeWindow: Window | undefined;
           help: '显示可用命令',
           summary: '查看连接状态/对象数量/最近消息',
           snapshot: '输出最新内存快照',
+          playerTab: '按玩家ID查看 tab 匹配与城镇解析结果',
           markers: '输出当前地图 marker 统计',
           ws: '输出 websocket 状态',
           last: '输出最近一条 ws 消息元信息',
@@ -697,6 +702,22 @@ declare const unsafeWindow: Window | undefined;
       },
       snapshot() {
         return latestSnapshot;
+      },
+      playerTab(playerId) {
+        const normalizedId = String(playerId || '').trim();
+        const playerNode = normalizedId && latestSnapshot && typeof latestSnapshot.players === 'object'
+          ? latestSnapshot.players[normalizedId]
+          : null;
+        const playerData = getPlayerDataNode(playerNode);
+        const tabInfo = normalizedId ? getTabPlayerInfo(normalizedId) : null;
+        return {
+          playerId: normalizedId,
+          playerData,
+          tabInfo,
+          renderedTownText: tabInfo && typeof tabInfo.teamText === 'string' ? tabInfo.teamText : '',
+          showPlayerText: Boolean(CONFIG.SHOW_PLAYER_TEXT),
+          showTownInfo: Boolean(CONFIG.SHOW_LABEL_TOWN_INFO),
+        };
       },
       markers() {
         return mapProjection.getCounts();

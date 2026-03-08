@@ -122,7 +122,6 @@ const quickLabels = ['侦查', '重点观察', '突击组', '运输', '危险'];
 
 const hasPlayers = computed(() => props.state.players.length > 0);
 const hasMapPlayers = computed(() => props.state.mapPlayers.length > 0);
-const quickPlayers = computed(() => props.state.players.slice(0, 8));
 const configMenuVisible = ref(false);
 
 const statusToneClass = computed(() => {
@@ -397,18 +396,6 @@ function applyQuickLabel(label: string) {
           </option>
         </select>
       </div>
-      <div v-if="quickPlayers.length > 0" class="n-chip-list full-width">
-        <button
-          v-for="item in quickPlayers"
-          :key="item.playerId"
-          type="button"
-          class="n-chip-btn"
-          :class="{ active: state.selectedPlayerId === item.playerId }"
-          @click="selectPlayer(item.playerId)"
-        >
-          {{ item.playerName }}
-        </button>
-      </div>
       <div class="n-segmented full-width">
         <button type="button" class="n-segment-btn is-friendly" :class="{ active: state.mark.team === 'friendly' }" @click="applyTeamPreset('friendly')">友军</button>
         <button type="button" class="n-segment-btn is-neutral" :class="{ active: state.mark.team === 'neutral' }" @click="applyTeamPreset('neutral')">中立</button>
@@ -439,11 +426,11 @@ function applyQuickLabel(label: string) {
       <div class="n-subtitle">自动识别标签</div>
       <div class="n-row">
         <label>友军标签（逗号分隔，按游戏中的前缀识别）</label>
-        <input v-model="state.form.FRIENDLY_TAGS" @input="markMainTextDirty" id="nodemc-overlay-friendly-tags" type="text" placeholder="[xxx],[队友]" />
+        <input v-model="state.form.FRIENDLY_TAGS" @input="markMainTextDirty" id="nodemc-overlay-friendly-tags" type="text" placeholder="xxx,队友" />
       </div>
       <div class="n-row">
         <label>敌军标签（逗号分隔，按游戏中的前缀识别）</label>
-        <input v-model="state.form.ENEMY_TAGS" @input="markMainTextDirty" id="nodemc-overlay-enemy-tags" type="text" placeholder="[yyy],[红队]" />
+        <input v-model="state.form.ENEMY_TAGS" @input="markMainTextDirty" id="nodemc-overlay-enemy-tags" type="text" placeholder="yyy,红队" />
       </div>
       <label class="n-check full-width"><input v-model="state.form.AUTO_TEAM_FROM_NAME" @change="triggerAutoApply" id="nodemc-overlay-auto-team" type="checkbox" />按名字标签自动判定友敌</label>
       <div class="n-btns">
