@@ -1,3 +1,4 @@
+import type { AdminInboundPacket, AdminOutboundPacket, TabStatePatch } from './networkSchemas';
 import {
   ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
 } from '../constants';
@@ -6,8 +7,6 @@ import {
   shouldResyncForScopeMissingBaseline,
 } from '../utils/overlayUtils';
 import {
-  AdminInboundPacket,
-  AdminOutboundPacket,
   AdminSnapshot,
   buildAdminHandshake,
   buildAdminResyncRequest,
@@ -130,7 +129,15 @@ export function createAdminWsClient(deps: WsClientDeps) {
     const meta = (message.meta && typeof message.meta === 'object') ? message.meta : {};
     const metaTabState = (meta as Record<string, unknown>).tabState;
     if (metaTabState && typeof metaTabState === 'object') {
-      latestSnapshot.tabState = metaTabState as { enabled: boolean; reports: Record<string, any>; groups: any[] };
+      latestSnapshot.tabState = metaTabState as { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] };
+    }
+
+    const metaTabStatePatch = (meta as Record<string, unknown>).tabStatePatch;
+    if (metaTabStatePatch && typeof metaTabStatePatch === 'object') {
+      latestSnapshot.tabState = applyTabStatePatch(
+        latestSnapshot.tabState,
+        metaTabStatePatch as TabStatePatch,
+      );
     }
     const metaConnections = (meta as Record<string, unknown>).connections;
     if (Array.isArray(metaConnections)) {
@@ -146,6 +153,35 @@ export function createAdminWsClient(deps: WsClientDeps) {
     }
 
     deps.onSnapshotChanged(latestSnapshot);
+  }
+
+  function applyTabStatePatch(
+    currentTabState: { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] } | null | undefined,
+    patch: TabStatePatch,
+  ) {
+    const base = currentTabState && typeof currentTabState === 'object'
+      ? currentTabState
+      : { enabled: false, reports: {}, groups: [] };
+    const nextReports = { ...(base.reports && typeof base.reports === 'object' ? base.reports : {}) };
+
+    if (patch.upsertReports && typeof patch.upsertReports === 'object') {
+      for (const [sourceId, report] of Object.entries(patch.upsertReports)) {
+        nextReports[sourceId] = report;
+      }
+    }
+
+    if (Array.isArray(patch.deleteReports)) {
+      for (const sourceId of patch.deleteReports) {
+        delete nextReports[String(sourceId)];
+      }
+    }
+
+    return {
+      enabled: patch.enabled !== undefined ? Boolean(patch.enabled) : Boolean(base.enabled),
+      roomCode: patch.roomCode !== undefined ? String(patch.roomCode || '') : base.roomCode,
+      reports: nextReports,
+      groups: Array.isArray(patch.groups) ? patch.groups : (Array.isArray(base.groups) ? base.groups : []),
+    };
   }
 
   function sendCommand(message: AdminOutboundPacket) {

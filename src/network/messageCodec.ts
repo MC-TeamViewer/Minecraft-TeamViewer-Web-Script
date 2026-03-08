@@ -16,6 +16,7 @@ const UUID_LIST_KEYS = new Set([
   'targetEntityIds',
   'players',
   'delete',
+  'deleteReports',
   'connections',
   'members',
   'waypointIds',
@@ -27,6 +28,7 @@ const UUID_KEYED_MAP_KEYS = new Set([
   'waypoints',
   'playerMarks',
   'reports',
+  'upsertReports',
   'sourceToGroup',
   'upsert',
 ]);
@@ -100,7 +102,7 @@ function normalizeInboundUuidFields(payload: unknown, keyName?: string): unknown
 
   if (Array.isArray(payload)) {
     if (keyName && UUID_LIST_KEYS.has(keyName)) {
-      return payload.map((item) => bytesToUuid(item) ?? normalizeInboundUuidFields(item));
+      return payload.map((item) => bytesToUuid(item) ?? normalizeInboundUuidFields(item, keyName));
     }
     return payload.map((item) => normalizeInboundUuidFields(item));
   }
@@ -140,7 +142,7 @@ function normalizeOutboundUuidFields(payload: unknown, keyName?: string): unknow
 
   if (Array.isArray(payload)) {
     if (keyName && UUID_LIST_KEYS.has(keyName)) {
-      return payload.map((item) => uuidToBytes(item) ?? normalizeOutboundUuidFields(item));
+      return payload.map((item) => uuidToBytes(item) ?? normalizeOutboundUuidFields(item, keyName));
     }
     return payload.map((item) => normalizeOutboundUuidFields(item));
   }

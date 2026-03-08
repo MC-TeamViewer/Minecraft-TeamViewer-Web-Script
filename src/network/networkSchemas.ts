@@ -142,7 +142,7 @@ export type AdminSnapshot = {
   entities: Record<string, EntityNode>;
   waypoints: Record<string, WaypointNode>;
   playerMarks: Record<string, any>;
-  tabState: { enabled: boolean; reports: Record<string, any>; groups: any[] };
+  tabState: { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] };
   connections: string[];
   connections_count: number;
   server_time: number | null;
@@ -243,11 +243,19 @@ export type SnapshotFullInboundPacket = {
   entities?: Record<string, EntityNode>;
   waypoints?: Record<string, WaypointNode>;
   playerMarks?: Record<string, unknown>;
-  tabState?: { enabled: boolean; reports: Record<string, any>; groups: any[] };
+  tabState?: { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] };
   connections?: string[];
   connections_count?: number;
   server_time?: number | null;
   [key: string]: unknown;
+};
+
+export type TabStatePatch = {
+  enabled?: boolean;
+  roomCode?: string;
+  groups?: any[];
+  upsertReports?: Record<string, any>;
+  deleteReports?: string[];
 };
 
 export type ScopePatch = {
@@ -279,7 +287,7 @@ export function createEmptyAdminSnapshotModel(): AdminSnapshot {
     entities: {},
     waypoints: {},
     playerMarks: {},
-    tabState: { enabled: false, reports: {}, groups: [] },
+    tabState: { enabled: false, roomCode: '', reports: {}, groups: [] },
     connections: [],
     connections_count: 0,
     server_time: null,
