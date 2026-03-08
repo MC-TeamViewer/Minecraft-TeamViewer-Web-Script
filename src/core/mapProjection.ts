@@ -50,7 +50,28 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const markersById = new Map<string, any>();
   const waypointsById = new Map<string, any>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
-  const reporterEffectsById = new Map<string, { vision: any | null; chunkArea: any | null }>();
+  const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
+  const reporterEffectLayersByStyle = new Map<string, any>();
+
+  type ReporterEffectEntry = {
+    kind: 'vision' | 'chunkArea';
+    styleKey: string;
+    latLngs: any;
+    style: {
+      color: string;
+      weight: number;
+      opacity: number;
+      fillColor: string;
+      fillOpacity: number;
+      interactive: false;
+      smoothFactor?: number;
+    };
+  };
+
+  type ReporterIdentitySet = {
+    ids: Set<string>;
+    names: Set<string>;
+  };
 
   const MAP_HOVER_BLOCK_CLASS = 'nodemc-map-hover-popup-blocked';
   const MAP_HOVER_BLOCK_STYLE = `
@@ -785,21 +806,55 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return normalizeColor(text, fallbackColor);
   }
 
-  function getReportingPlayerIds(snapshot: any) {
-    const ids = new Set<string>();
-    const tabState = snapshot && typeof snapshot === 'object' ? snapshot.tabState : null;
-    const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
-    if (!reports) return ids;
-
-    for (const reportKey of Object.keys(reports)) {
-      const playerId = String(reportKey || '').trim();
-      if (!playerId) continue;
-      ids.add(playerId);
-    }
-    return ids;
+  function normalizeReporterName(value: unknown) {
+    return String(value || '').trim().toLowerCase();
   }
 
-  function isReportingPlayer(playerId: string, rawNode: any, playerData: any, reportingPlayerIds: Set<string>) {
+  function addReporterName(target: Set<string>, value: unknown) {
+    const normalized = normalizeReporterName(value);
+    if (normalized) target.add(normalized);
+  }
+
+  function getReportingPlayerIdentities(snapshot: any): ReporterIdentitySet {
+    const ids = new Set<string>();
+    const names = new Set<string>();
+
+    const connections = Array.isArray(snapshot?.connections) ? snapshot.connections : [];
+    for (const connectionId of connections) {
+      const text = String(connectionId || '').trim();
+      if (text) ids.add(text);
+    }
+
+    const tabState = snapshot && typeof snapshot === 'object' ? snapshot.tabState : null;
+    const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
+    if (!reports) return { ids, names };
+
+    for (const [reportKey, rawReport] of Object.entries(reports)) {
+      const report = rawReport && typeof rawReport === 'object' ? rawReport as Record<string, any> : null;
+      const reportId = String(reportKey || '').trim();
+      const submitPlayerId = String(report?.submitPlayerId || '').trim();
+
+      if (reportId) ids.add(reportId);
+      if (submitPlayerId) ids.add(submitPlayerId);
+
+      const players = Array.isArray(report?.players) ? report.players : [];
+      const reporterRow = players.find((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const itemUuid = String((item as any).uuid || (item as any).playerUUID || (item as any).id || '').trim();
+        return Boolean(itemUuid) && (itemUuid === reportId || itemUuid === submitPlayerId);
+      });
+
+      if (reporterRow && typeof reporterRow === 'object') {
+        addReporterName(names, (reporterRow as any).name);
+        addReporterName(names, (reporterRow as any).displayName);
+        addReporterName(names, (reporterRow as any).prefixedName);
+      }
+    }
+
+    return { ids, names };
+  }
+
+  function isReportingPlayer(playerId: string, rawNode: any, playerData: any, reporterIdentities: ReporterIdentitySet) {
     const idCandidates = new Set<string>();
     const pushId = (value: unknown) => {
       const text = String(value || '').trim();
@@ -811,18 +866,94 @@ export function createMapProjection(deps: MapProjectionDeps) {
     pushId(rawNode && (rawNode.playerUUID || rawNode.uuid || rawNode.id));
 
     for (const maybeId of idCandidates) {
-      if (reportingPlayerIds.has(maybeId)) return true;
+      if (reporterIdentities.ids.has(maybeId)) return true;
+    }
+
+    const nameCandidates = [
+      playerData && (playerData.playerName || playerData.name),
+      rawNode && (rawNode.playerName || rawNode.name),
+    ];
+    for (const candidate of nameCandidates) {
+      if (reporterIdentities.names.has(normalizeReporterName(candidate))) return true;
     }
 
     if (!rawNode || typeof rawNode !== 'object') return false;
     const submitPlayerId = String((rawNode as any).submitPlayerId || '').trim();
     if (!submitPlayerId) return false;
 
-    if (reportingPlayerIds.has(submitPlayerId)) return true;
+    if (reporterIdentities.ids.has(submitPlayerId)) return true;
     for (const maybeId of idCandidates) {
       if (submitPlayerId === maybeId) return true;
     }
     return false;
+  }
+
+  function buildReporterEffectStyleKey(kind: 'vision' | 'chunkArea', style: ReporterEffectEntry['style']) {
+    return [
+      kind,
+      style.color,
+      style.weight,
+      style.opacity,
+      style.fillColor,
+      style.fillOpacity,
+      style.smoothFactor ?? '',
+    ].join('|');
+  }
+
+  function collectReporterEffectLatLngs(kind: 'vision' | 'chunkArea', groupedEntries: ReporterEffectEntry[]) {
+    if (kind === 'chunkArea') {
+      const merged: any[] = [];
+      for (const entry of groupedEntries) {
+        if (Array.isArray(entry.latLngs)) {
+          merged.push(...entry.latLngs);
+        }
+      }
+      return merged;
+    }
+
+    if (groupedEntries.length === 1) {
+      return groupedEntries[0].latLngs;
+    }
+    return groupedEntries.map((entry) => entry.latLngs);
+  }
+
+  function rebuildReporterEffectLayers(map: any) {
+    const grouped = new Map<string, { kind: 'vision' | 'chunkArea'; style: ReporterEffectEntry['style']; entries: ReporterEffectEntry[] }>();
+
+    for (const layers of reporterEffectsById.values()) {
+      for (const entry of [layers.vision, layers.chunkArea]) {
+        if (!entry) continue;
+        const bucket = grouped.get(entry.styleKey);
+        if (bucket) {
+          bucket.entries.push(entry);
+          continue;
+        }
+        grouped.set(entry.styleKey, {
+          kind: entry.kind,
+          style: entry.style,
+          entries: [entry],
+        });
+      }
+    }
+
+    for (const [styleKey, group] of grouped.entries()) {
+      const latLngs = collectReporterEffectLatLngs(group.kind, group.entries);
+      const existingLayer = reporterEffectLayersByStyle.get(styleKey);
+      if (existingLayer) {
+        existingLayer.setLatLngs(latLngs);
+        existingLayer.setStyle(group.style);
+        continue;
+      }
+
+      const layer = leafletRef.polygon(latLngs, group.style).addTo(map);
+      reporterEffectLayersByStyle.set(styleKey, layer);
+    }
+
+    for (const [styleKey, layer] of reporterEffectLayersByStyle.entries()) {
+      if (grouped.has(styleKey)) continue;
+      try { layer.remove(); } catch (_) {}
+      reporterEffectLayersByStyle.delete(styleKey);
+    }
   }
 
   function buildWorldCircleLatLngs(map: any, centerX: number, centerZ: number, radiusBlocks: number, segments = 48) {
@@ -1006,12 +1137,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const existing = reporterEffectsById.get(playerId) || { vision: null, chunkArea: null };
 
     if (!isReporter || !payload || typeof payload !== 'object') {
-      if (existing.vision) {
-        try { existing.vision.remove(); } catch (_) {}
-      }
-      if (existing.chunkArea) {
-        try { existing.chunkArea.remove(); } catch (_) {}
-      }
       reporterEffectsById.delete(playerId);
       return;
     }
@@ -1027,28 +1152,22 @@ export function createMapProjection(deps: MapProjectionDeps) {
       const visionColor = getReporterEffectColor('REPORTER_VISION_COLOR', color);
       const visionFillOpacity = getReporterVisionOpacity();
       const visionLineOpacity = Math.max(0.25, Math.min(1, visionFillOpacity + 0.45));
-      if (existing.vision) {
-        existing.vision.setLatLngs(circlePath);
-        existing.vision.setStyle({
-          color: visionColor,
-          weight: 1.5,
-          opacity: visionLineOpacity,
-          fillColor: visionColor,
-          fillOpacity: visionFillOpacity,
-        });
-      } else {
-        existing.vision = leafletRef.polygon(circlePath, {
-          color: visionColor,
-          weight: 1.5,
-          opacity: visionLineOpacity,
-          fillColor: visionColor,
-          fillOpacity: visionFillOpacity,
-          interactive: false,
-          smoothFactor: 0.5,
-        }).addTo(map);
-      }
-    } else if (existing.vision) {
-      try { existing.vision.remove(); } catch (_) {}
+      const style = {
+        color: visionColor,
+        weight: 1.5,
+        opacity: visionLineOpacity,
+        fillColor: visionColor,
+        fillOpacity: visionFillOpacity,
+        interactive: false as const,
+        smoothFactor: 0.5,
+      };
+      existing.vision = {
+        kind: 'vision',
+        styleKey: buildReporterEffectStyleKey('vision', style),
+        latLngs: circlePath,
+        style,
+      };
+    } else {
       existing.vision = null;
     }
 
@@ -1058,27 +1177,21 @@ export function createMapProjection(deps: MapProjectionDeps) {
       const chunkColor = getReporterEffectColor('REPORTER_CHUNK_COLOR', color);
       const chunkFillOpacity = getReporterChunkOpacity();
       const chunkLineOpacity = Math.max(0.2, Math.min(1, chunkFillOpacity + 0.35));
-      if (existing.chunkArea) {
-        existing.chunkArea.setLatLngs(areaPath);
-        existing.chunkArea.setStyle({
-          color: chunkColor,
-          weight: 0.8,
-          opacity: chunkLineOpacity,
-          fillColor: chunkColor,
-          fillOpacity: chunkFillOpacity,
-        });
-      } else {
-        existing.chunkArea = leafletRef.polygon(areaPath, {
-          color: chunkColor,
-          weight: 0.8,
-          opacity: chunkLineOpacity,
-          fillColor: chunkColor,
-          fillOpacity: chunkFillOpacity,
-          interactive: false,
-        }).addTo(map);
-      }
-    } else if (existing.chunkArea) {
-      try { existing.chunkArea.remove(); } catch (_) {}
+      const style = {
+        color: chunkColor,
+        weight: 0.8,
+        opacity: chunkLineOpacity,
+        fillColor: chunkColor,
+        fillOpacity: chunkFillOpacity,
+        interactive: false as const,
+      };
+      existing.chunkArea = {
+        kind: 'chunkArea',
+        styleKey: buildReporterEffectStyleKey('chunkArea', style),
+        latLngs: areaPath,
+        style,
+      };
+    } else {
       existing.chunkArea = null;
     }
 
@@ -1264,12 +1377,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
   function removeMissingReporterEffects(nextIds: Set<string>) {
     for (const [playerId, layers] of reporterEffectsById.entries()) {
       if (nextIds.has(playerId)) continue;
-      if (layers.vision) {
-        try { layers.vision.remove(); } catch (_) {}
-      }
-      if (layers.chunkArea) {
-        try { layers.chunkArea.remove(); } catch (_) {}
-      }
       reporterEffectsById.delete(playerId);
     }
   }
@@ -1286,7 +1393,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const nextIds = new Set<string>();
     const nextPlayerIds = new Set<string>();
     const autoMarkSyncCandidates: any[] = [];
-    const reportingPlayerIds = getReportingPlayerIds(snapshot);
+    const reporterIdentities = getReportingPlayerIdentities(snapshot);
 
     for (const [playerId, rawNode] of Object.entries(players)) {
       const data = getPlayerDataNode(rawNode);
@@ -1348,7 +1455,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
             color: tabInfo.teamColor || null,
           }
         : null;
-      const isReporter = isReportingPlayer(String(playerId), rawNode, data, reportingPlayerIds);
+      const isReporter = isReportingPlayer(String(playerId), rawNode, data, reporterIdentities);
       const isRiding = parseBooleanFlag((data as any).isRiding);
 
       nextIds.add(String(playerId));
@@ -1428,6 +1535,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     removeMissingMarkers(nextIds);
     removeMissingWaypoints(nextWaypointIds);
     removeMissingReporterEffects(nextPlayerIds);
+    rebuildReporterEffectLayers(map);
     deps.maybeSyncAutoDetectedMarks(autoMarkSyncCandidates);
 
     (PAGE as any).__NODEMC_PLAYER_OVERLAY__ = {
@@ -1508,10 +1616,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
     }
     waypointsById.clear();
 
-    for (const layers of reporterEffectsById.values()) {
-      try { layers.vision?.remove(); } catch (_) {}
-      try { layers.chunkArea?.remove(); } catch (_) {}
+    for (const layer of reporterEffectLayersByStyle.values()) {
+      try { layer.remove(); } catch (_) {}
     }
+    reporterEffectLayersByStyle.clear();
     reporterEffectsById.clear();
 
     try {
