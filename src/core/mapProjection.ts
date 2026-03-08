@@ -63,6 +63,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       opacity: number;
       fillColor: string;
       fillOpacity: number;
+      fillRule?: 'evenodd' | 'nonzero';
       interactive: false;
       smoothFactor?: number;
     };
@@ -896,6 +897,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       style.opacity,
       style.fillColor,
       style.fillOpacity,
+      style.fillRule ?? '',
       style.smoothFactor ?? '',
     ].join('|');
   }
@@ -1158,6 +1160,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
         opacity: visionLineOpacity,
         fillColor: visionColor,
         fillOpacity: visionFillOpacity,
+        fillRule: 'nonzero' as const,
         interactive: false as const,
         smoothFactor: 0.5,
       };
@@ -1183,6 +1186,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
         opacity: chunkLineOpacity,
         fillColor: chunkColor,
         fillOpacity: chunkFillOpacity,
+        fillRule: 'nonzero' as const,
         interactive: false as const,
       };
       existing.chunkArea = {
