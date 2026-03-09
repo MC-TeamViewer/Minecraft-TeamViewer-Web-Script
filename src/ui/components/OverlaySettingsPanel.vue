@@ -238,7 +238,6 @@ function applyQuickLabel(label: string) {
   <div class="n-header" id="nodemc-overlay-title">
     <div class="n-header-top">
       <div class="n-overview-copy">
-        <div class="n-eyebrow">当前工作区</div>
         <div class="n-hero-title">{{ statusTitle }}</div>
       </div>
       <div class="n-status-pill" :class="statusToneClass">{{ state.overview.wsConnected ? 'WS 已连接' : 'WS 未连接' }}</div>
@@ -285,9 +284,15 @@ function applyQuickLabel(label: string) {
         <div>
           <div class="n-subtitle">快捷操作</div>
         </div>
-        <button id="nodemc-overlay-open-config-menu" type="button" class="n-btn-ghost" @click="toggleConfigMenu">
-          {{ configMenuVisible ? '收起工具' : '配置工具' }}
-        </button>
+        <div class="n-section-actions">
+          <label class="n-check n-check-inline n-section-toggle" title="屏蔽原网页地图左/右键功能，保留拖拽与滚轮缩放">
+            <input v-model="state.form.BLOCK_MAP_LEFT_RIGHT_CLICK" @change="triggerAutoApply" id="nodemc-overlay-block-map-click" type="checkbox" />
+            <span>屏蔽地图左/右键</span>
+          </label>
+          <button id="nodemc-overlay-open-config-menu" type="button" class="n-btn-ghost" @click="toggleConfigMenu">
+            {{ configMenuVisible ? '收起工具' : '配置工具' }}
+          </button>
+        </div>
       </div>
 
       <div class="n-quick-grid">
@@ -381,10 +386,14 @@ function applyQuickLabel(label: string) {
     </div>
 
     <div class="n-card">
-      <div class="n-subtitle">目标玩家</div>
+      <div class="n-subtitle">定向标记玩家</div>
       <div class="n-row full-width">
-        <label>在线玩家列表</label>
-        <select id="nodemc-mark-player-select" v-model="state.selectedPlayerId" @change="onPlayerSelectionChanged">
+        <select
+          id="nodemc-mark-player-select"
+          v-model="state.selectedPlayerId"
+          :class="{ 'is-placeholder': !state.selectedPlayerId }"
+          @change="onPlayerSelectionChanged"
+        >
           <option value="">{{ hasPlayers ? '请选择在线玩家…' : '暂无在线玩家' }}</option>
           <option
             v-for="item in state.players"
@@ -585,7 +594,6 @@ function applyQuickLabel(label: string) {
       <button id="nodemc-overlay-back-main" type="button" class="n-link-btn" @click="setPage('main')">返回概览</button>
     </div>
     <div class="n-card">
-      <label class="n-check"><input v-model="state.form.BLOCK_MAP_LEFT_RIGHT_CLICK" @change="triggerAutoApply" id="nodemc-overlay-block-map-click" type="checkbox" />屏蔽原网页地图左/右键功能（保留拖拽与滚轮缩放）</label>
       <label class="n-check"><input v-model="state.form.ENABLE_TACTICAL_MAP_MARKING" @change="triggerAutoApply" id="nodemc-overlay-enable-tactical-marking" type="checkbox" />启用战术地图标记（右键空白处选择类型后落点，右键已有 waypoint 删除）</label>
       <div class="n-row full-width">
         <label>战术标记默认有效期（秒，右键时可改为 long 长期）</label>

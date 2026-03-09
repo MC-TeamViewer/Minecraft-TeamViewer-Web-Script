@@ -123,7 +123,9 @@ declare const unsafeWindow: Window | undefined;
           name,
           teamText,
           teamColor: parsedDisplay.color,
-          autoName: prefixedName || parsedDisplay.plain || name || null,
+          // Prefer the canonical player name from TAB data. Older payloads may only
+          // provide prefixed/display text, so keep those as a fallback.
+          autoName: name || parsedDisplay.plain || prefixedName || null,
           displayNameRaw,
           prefixedName,
           matchedBy: 'uuid',
