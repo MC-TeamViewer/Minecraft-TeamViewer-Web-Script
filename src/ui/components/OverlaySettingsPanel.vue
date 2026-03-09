@@ -53,6 +53,7 @@ type OverlayUiState = {
     ROOM_CODE: string;
     RECONNECT_INTERVAL_MS: string;
     TARGET_DIMENSION: string;
+    SHOW_CAPTURE_INFO: boolean;
     SHOW_PLAYER_ICON: boolean;
     SHOW_PLAYER_TEXT: boolean;
     SHOW_HORSE_TEXT: boolean;
@@ -453,13 +454,13 @@ function applyQuickLabel(label: string) {
     <div class="n-nav-row">
       <div>
         <div class="n-subtitle" style="margin: 0">显示设置</div>
-        <div class="n-section-copy">把尺寸、颜色和特殊显示集中在一页处理</div>
       </div>
       <button id="nodemc-overlay-back-main-from-display" type="button" class="n-link-btn" @click="setPage('main')">返回概览</button>
     </div>
 
     <div class="n-card">
       <div class="n-subtitle">显示开关</div>
+      <label class="n-check"><input v-model="state.form.SHOW_CAPTURE_INFO" @change="triggerAutoApply" id="nodemc-overlay-show-capture-info" type="checkbox" />显示插旗信息</label>
       <label class="n-check"><input v-model="state.form.SHOW_PLAYER_ICON" @change="triggerAutoApply" id="nodemc-overlay-show-icon" type="checkbox" />显示玩家图标（图标中心对准玩家坐标）</label>
       <label class="n-check"><input v-model="state.form.SHOW_PLAYER_TEXT" @change="triggerAutoApply" id="nodemc-overlay-show-text" type="checkbox" />显示玩家文字信息（仅文字时左端对准玩家坐标）</label>
       <label class="n-check"><input v-model="state.form.SHOW_WAYPOINT_ICON" @change="triggerAutoApply" id="nodemc-overlay-show-waypoint-icon" type="checkbox" />显示报点图标（图标中心对准报点坐标）</label>

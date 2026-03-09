@@ -48,6 +48,7 @@ type OverlayFormState = {
   ROOM_CODE: string;
   RECONNECT_INTERVAL_MS: string;
   TARGET_DIMENSION: string;
+  SHOW_CAPTURE_INFO: boolean;
   SHOW_PLAYER_ICON: boolean;
   SHOW_PLAYER_TEXT: boolean;
   SHOW_HORSE_TEXT: boolean;
@@ -88,6 +89,7 @@ function createDefaultFormState(): OverlayFormState {
     ROOM_CODE: '',
     RECONNECT_INTERVAL_MS: '1000',
     TARGET_DIMENSION: 'minecraft:overworld',
+    SHOW_CAPTURE_INFO: true,
     SHOW_PLAYER_ICON: true,
     SHOW_PLAYER_TEXT: true,
     SHOW_HORSE_TEXT: true,
@@ -446,6 +448,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.form.TARGET_DIMENSION = String(config.TARGET_DIMENSION ?? 'minecraft:overworld');
     state.overview.roomCode = state.form.ROOM_CODE || 'default';
     state.overview.targetDimension = state.form.TARGET_DIMENSION || 'minecraft:overworld';
+    state.form.SHOW_CAPTURE_INFO = Boolean(config.SHOW_CAPTURE_INFO);
     state.form.SHOW_PLAYER_ICON = Boolean(config.SHOW_PLAYER_ICON);
     state.form.SHOW_PLAYER_TEXT = Boolean(config.SHOW_PLAYER_TEXT);
     state.form.SHOW_HORSE_TEXT = Boolean(config.SHOW_HORSE_TEXT);
@@ -491,6 +494,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       ROOM_CODE: state.form.ROOM_CODE || config.ROOM_CODE,
       RECONNECT_INTERVAL_MS: state.form.RECONNECT_INTERVAL_MS || config.RECONNECT_INTERVAL_MS,
       TARGET_DIMENSION: state.form.TARGET_DIMENSION || config.TARGET_DIMENSION,
+      SHOW_CAPTURE_INFO: state.form.SHOW_CAPTURE_INFO,
       SHOW_PLAYER_ICON: state.form.SHOW_PLAYER_ICON,
       SHOW_PLAYER_TEXT: state.form.SHOW_PLAYER_TEXT,
       SHOW_HORSE_TEXT: state.form.SHOW_HORSE_TEXT,

@@ -124,6 +124,9 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   next.SHOW_PLAYER_ICON = candidate.SHOW_PLAYER_ICON === undefined
     ? DEFAULT_CONFIG.SHOW_PLAYER_ICON
     : Boolean(candidate.SHOW_PLAYER_ICON);
+  next.SHOW_CAPTURE_INFO = candidate.SHOW_CAPTURE_INFO === undefined
+    ? DEFAULT_CONFIG.SHOW_CAPTURE_INFO
+    : Boolean(candidate.SHOW_CAPTURE_INFO);
   next.SHOW_PLAYER_TEXT = candidate.SHOW_PLAYER_TEXT === undefined
     ? DEFAULT_CONFIG.SHOW_PLAYER_TEXT
     : Boolean(candidate.SHOW_PLAYER_TEXT);

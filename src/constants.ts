@@ -12,6 +12,7 @@ export const DEFAULT_CONFIG = {
   ROOM_CODE: 'default',
   RECONNECT_INTERVAL_MS: 1000,
   TARGET_DIMENSION: 'minecraft:overworld',
+  SHOW_CAPTURE_INFO: true,
   SHOW_PLAYER_ICON: true,
   SHOW_PLAYER_TEXT: true,
   SHOW_HORSE_TEXT: true,

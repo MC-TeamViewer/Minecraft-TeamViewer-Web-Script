@@ -4,6 +4,7 @@ import {
   normalizeDimension,
   normalizeMarkSource,
   normalizeTeam,
+  parseMcDisplayName,
   readNumber,
 } from '../utils/overlayUtils';
 
@@ -758,14 +759,17 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function getMarkerVisualConfig(markerKind: string) {
     const isHorse = markerKind === 'horse';
+    const isArmorStandPair = markerKind === 'armor-stand-pair';
     const iconSizeRaw = Number(isHorse ? CONFIG.HORSE_ICON_SIZE : CONFIG.PLAYER_ICON_SIZE);
     const textSizeRaw = Number(isHorse ? CONFIG.HORSE_TEXT_SIZE : CONFIG.PLAYER_TEXT_SIZE);
-    const iconSize = Number.isFinite(iconSizeRaw) ? Math.max(6, Math.min(40, Math.round(iconSizeRaw))) : (isHorse ? 14 : 10);
+    const iconSizeFallback = isHorse ? 14 : (isArmorStandPair ? 12 : 10);
+    const iconSizeBase = Number.isFinite(iconSizeRaw) ? Math.max(6, Math.min(40, Math.round(iconSizeRaw))) : iconSizeFallback;
+    const iconSize = isArmorStandPair ? Math.max(10, iconSizeBase + 2) : iconSizeBase;
     const textSize = Number.isFinite(textSizeRaw) ? Math.max(8, Math.min(32, Math.round(textSizeRaw))) : 12;
     return {
       iconSize,
       textSize,
-      labelOffset: iconSize,
+      labelOffset: isArmorStandPair ? iconSize + 4 : iconSize,
     };
   }
 
@@ -809,6 +813,94 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function normalizeReporterName(value: unknown) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  function hasHalfBlockFraction(value: number) {
+    if (!Number.isFinite(value)) return false;
+    const fraction = value - Math.floor(value);
+    return Math.abs(fraction - 0.5) < 1e-6;
+  }
+
+  function buildArmorStandPairKey(dimension: string, x: number, z: number) {
+    return `${dimension}|${x.toFixed(3)}|${z.toFixed(3)}`;
+  }
+
+  function collectRenderableArmorStandPairs(snapshot: any, wantedDim: string) {
+    const entities = snapshot && typeof snapshot === 'object' ? snapshot.entities : null;
+    if (!entities || typeof entities !== 'object') return [];
+
+    const labelRegex = /^§[0-9a-fA-F]\[[^\]]+\]$/;
+    const timerRegex = /^\[\d{2}:\d{2}\]$/;
+    const grouped = new Map<string, {
+      x: number;
+      z: number;
+      labels: Array<{ name: string; color: string | null; y: number }>;
+      timers: Array<{ name: string; y: number }>;
+    }>();
+
+    for (const rawNode of Object.values(entities)) {
+      const data = getPlayerDataNode(rawNode);
+      if (!data) continue;
+
+      const entityType = String(data.entityType || '').trim().toLowerCase();
+      if (entityType !== 'entity.minecraft.armor_stand') continue;
+
+      const dim = normalizeDimension(data.dimension);
+      if (wantedDim && dim !== wantedDim) continue;
+
+      const x = readNumber(data.x);
+      const y = readNumber(data.y);
+      const z = readNumber(data.z);
+      if (x === null || z === null) continue;
+      if (!hasHalfBlockFraction(x) || !hasHalfBlockFraction(z)) continue;
+
+      const rawName = String(data.entityName || '').trim();
+      if (!rawName) continue;
+
+      const parsedName = parseMcDisplayName(rawName);
+      const plainName = String(parsedName.plain || '').trim();
+      const key = buildArmorStandPairKey(dim, x, z);
+      let group = grouped.get(key);
+      if (!group) {
+        group = { x, z, labels: [], timers: [] };
+        grouped.set(key, group);
+      }
+
+      if (labelRegex.test(rawName) && /^\[[^\]]+\]$/.test(plainName)) {
+        group.labels.push({
+          name: plainName,
+          color: parsedName.color || null,
+          y: y === null ? 0 : y,
+        });
+        continue;
+      }
+
+      if (timerRegex.test(plainName)) {
+        group.timers.push({
+          name: plainName,
+          y: y === null ? 0 : y,
+        });
+      }
+    }
+
+    const markers: Array<{ markerId: string; x: number; z: number; name: string; color: string }> = [];
+    for (const [key, group] of grouped.entries()) {
+      if (!group.labels.length || !group.timers.length) continue;
+
+      const labelEntry = group.labels.sort((left, right) => right.y - left.y)[0];
+      const timerEntry = group.timers.sort((left, right) => right.y - left.y)[0];
+      const color = normalizeColor(labelEntry.color, deps.getConfiguredTeamColor('neutral'));
+
+      markers.push({
+        markerId: `entity:armor-stand-pair:${key}`,
+        x: group.x,
+        z: group.z,
+        name: `[🚩插旗] ${labelEntry.name} ${timerEntry.name}`,
+        color,
+      });
+    }
+
+    return markers;
   }
 
   function addReporterName(target: Set<string>, value: unknown) {
@@ -1012,10 +1104,12 @@ export function createMapProjection(deps: MapProjectionDeps) {
     isReporter = false,
     isRiding = false
   ) {
+    const isHorse = markerKind === 'horse';
+    const isArmorStandPair = markerKind === 'armor-stand-pair';
     const team = mark ? normalizeTeam(mark.team) : 'neutral';
     const color = mark ? normalizeColor(mark.color, deps.getConfiguredTeamColor(team)) : deps.getConfiguredTeamColor(team);
-    const showIcon = Boolean(CONFIG.SHOW_PLAYER_ICON);
-    const showText = markerKind === 'horse' ? Boolean(CONFIG.SHOW_HORSE_TEXT) : Boolean(CONFIG.SHOW_PLAYER_TEXT);
+    const showIcon = isArmorStandPair ? true : Boolean(CONFIG.SHOW_PLAYER_ICON);
+    const showText = isHorse ? Boolean(CONFIG.SHOW_HORSE_TEXT) : (isArmorStandPair ? true : Boolean(CONFIG.SHOW_PLAYER_TEXT));
     if (!showIcon && !showText) {
       return '';
     }
@@ -1042,15 +1136,15 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const useReporterHighlight = markerKind === 'player' && isReporter && Boolean(CONFIG.REPORTER_STAR_ICON);
     const iconSize = useReporterHighlight ? Math.max(15, visual.iconSize + 3) : visual.iconSize;
 
-    const iconContent = markerKind === 'horse' ? '🐎' : '';
-    const iconExtraClass = useReporterHighlight ? ' is-reporter-highlight' : '';
+    const iconContent = isHorse ? '🐎' : (isArmorStandPair ? '⌖' : '');
+    const iconExtraClass = `${isHorse ? ' is-horse' : ''}${useReporterHighlight ? ' is-reporter-highlight' : ''}${isArmorStandPair ? ' is-armor-stand-pair' : ''}`;
     const iconVisualStyle = useReporterHighlight
       ? `--reporter-accent-color:${color};background:${color};border:2px solid rgba(255,255,255,0.98);box-shadow:0 0 0 1px rgba(15,23,42,.88),0 0 0 3px ${color}42;`
-      : `background:${markerKind === 'horse' ? 'rgba(15,23,42,.92)' : color};box-shadow:0 0 0 2px ${color}55,0 0 0 1px rgba(15,23,42,.95) inset;`;
+      : `background:${isHorse ? 'rgba(15,23,42,.92)' : (isArmorStandPair ? 'rgba(15,23,42,.88)' : color)};color:${isArmorStandPair ? color : '#ffffff'};border:${isArmorStandPair ? `1.5px solid ${color}` : '1px solid rgba(255,255,255,0.9)'};box-shadow:0 0 0 2px ${color}55,0 0 0 1px rgba(15,23,42,.95) inset;`;
     const iconHtml = showIcon
-      ? `<span class="n-icon ${markerKind === 'horse' ? 'is-horse' : ''}${iconExtraClass}" style="${iconVisualStyle}width:${iconSize}px;height:${iconSize}px;line-height:${iconSize}px;font-size:${Math.max(9, Math.round(iconSize * 0.75))}px;">${iconContent}</span>`
+      ? `<span class="n-icon${iconExtraClass}" style="${iconVisualStyle}width:${iconSize}px;height:${iconSize}px;line-height:${iconSize}px;font-size:${Math.max(9, Math.round(iconSize * 0.75))}px;">${iconContent}</span>`
       : '';
-    const teamHtml = CONFIG.SHOW_LABEL_TEAM_INFO && markerKind !== 'horse'
+    const teamHtml = CONFIG.SHOW_LABEL_TEAM_INFO && !isHorse && !isArmorStandPair
       ? `<span class="n-team">[${safeTeam}]</span>`
       : '';
     const townHtml = CONFIG.SHOW_LABEL_TOWN_INFO && safeTown
@@ -1066,6 +1160,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function getMarkerZIndexOffset(markerKind: string) {
     if (markerKind === 'horse') return -1000;
+    if (markerKind === 'armor-stand-pair') return 2000;
     return 1000;
   }
 
@@ -1502,6 +1597,25 @@ export function createMapProjection(deps: MapProjectionDeps) {
           },
           townInfo: null,
           kind: 'horse',
+        });
+      }
+    }
+
+    if (Boolean(CONFIG.SHOW_CAPTURE_INFO)) {
+      for (const armorStandPair of collectRenderableArmorStandPairs(snapshot, wantedDim)) {
+        nextIds.add(armorStandPair.markerId);
+        upsertMarker(map, armorStandPair.markerId, {
+          x: armorStandPair.x,
+          z: armorStandPair.z,
+          health: null,
+          name: armorStandPair.name,
+          mark: {
+            team: 'neutral',
+            color: armorStandPair.color,
+            label: '',
+          },
+          townInfo: null,
+          kind: 'armor-stand-pair',
         });
       }
     }
