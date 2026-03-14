@@ -125,7 +125,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
       { value: 'gather', name: '集结', label: '📣 集结此处', color: '#22c55e' },
       { value: 'scout', name: '侦查', label: '👁 侦查此处', color: '#f59e0b' },
       { value: 'danger', name: '危险', label: '⚠ 危险区域', color: '#f97316' },
+      { value: 'custom', name: '自定义', label: '📍 自定义标点', color: '#0ea5e9' },
     ];
+  }
+
+  function sanitizeCustomTacticalLabel(raw: unknown) {
+    const text = String(raw || '').trim();
+    if (!text) return '📍 自定义标点';
+    return text.slice(0, 64);
   }
 
   function closeTacticalMenu() {
@@ -261,6 +268,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
         <span>标注类型</span>
         <select class="nmc-tactical-type"></select>
       </label>
+      <label class="nmc-tactical-row nmc-tactical-label-row" style="display:none;">
+        <span>标点文字</span>
+        <input class="nmc-tactical-label-input" type="text" maxlength="64" placeholder="例如：📌 这里集合" />
+      </label>
       <label class="nmc-tactical-row">
         <span>过期时间</span>
         <select class="nmc-tactical-ttl">
@@ -285,12 +296,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
     `;
 
     const typeSelect = menu.querySelector('.nmc-tactical-type') as HTMLSelectElement | null;
+    const customLabelRow = menu.querySelector('.nmc-tactical-label-row') as HTMLElement | null;
+    const customLabelInput = menu.querySelector('.nmc-tactical-label-input') as HTMLInputElement | null;
     const ttlSelect = menu.querySelector('.nmc-tactical-ttl') as HTMLSelectElement | null;
     const customRow = menu.querySelector('.nmc-tactical-custom-row') as HTMLElement | null;
     const customInput = menu.querySelector('.nmc-tactical-custom-ttl') as HTMLInputElement | null;
     const confirmBtn = menu.querySelector('.nmc-tactical-confirm') as HTMLButtonElement | null;
     const cancelBtn = menu.querySelector('.nmc-tactical-cancel') as HTMLButtonElement | null;
-    if (!typeSelect || !ttlSelect || !customRow || !customInput || !confirmBtn || !cancelBtn) {
+    if (!typeSelect || !customLabelRow || !customLabelInput || !ttlSelect || !customRow || !customInput || !confirmBtn || !cancelBtn) {
       return false;
     }
 
@@ -303,11 +316,37 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     const syncPreviewFromSelection = () => {
       const selectedType = typeOptions.find((item) => item.value === typeSelect.value) || typeOptions[0];
-      upsertTacticalPreviewMarker(map, worldPos, selectedType);
+      const isCustomType = selectedType.value === 'custom';
+      const previewType = isCustomType
+        ? {
+          ...selectedType,
+          label: sanitizeCustomTacticalLabel(customLabelInput.value),
+        }
+        : selectedType;
+      upsertTacticalPreviewMarker(map, worldPos, previewType);
     };
+
+    const syncCustomLabelVisibility = () => {
+      const selectedType = typeOptions.find((item) => item.value === typeSelect.value) || typeOptions[0];
+      const isCustomType = selectedType.value === 'custom';
+      customLabelRow.style.display = isCustomType ? 'flex' : 'none';
+      if (isCustomType && !customLabelInput.value.trim()) {
+        customLabelInput.value = selectedType.label;
+      }
+    };
+
+    syncCustomLabelVisibility();
     syncPreviewFromSelection();
 
     typeSelect.addEventListener('change', () => {
+      syncCustomLabelVisibility();
+      syncPreviewFromSelection();
+      if (typeSelect.value === 'custom') {
+        customLabelInput.focus();
+      }
+    });
+
+    customLabelInput.addEventListener('input', () => {
       syncPreviewFromSelection();
     });
 
@@ -326,6 +365,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     confirmBtn.addEventListener('click', () => {
       const selectedType = typeOptions.find((item) => item.value === typeSelect.value) || typeOptions[0];
+      const finalLabel = selectedType.value === 'custom'
+        ? sanitizeCustomTacticalLabel(customLabelInput.value)
+        : selectedType.label;
       const ttl = resolveTtlFromMenuValue(ttlSelect.value, customInput.value);
       if (!ttl) {
         customInput.focus();
@@ -336,7 +378,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
         deps.onCreateTacticalWaypoint({
           x: worldPos.x,
           z: worldPos.z,
-          label: selectedType.label,
+          label: finalLabel,
           tacticalType: selectedType.value,
           color: selectedType.color,
           ttlSeconds: ttl.ttlSeconds,

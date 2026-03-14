@@ -846,7 +846,7 @@ export const OVERLAY_STYLE_TEXT = `
   .nodemc-tactical-menu {
     position: fixed;
     z-index: 2147483200;
-    width: 236px;
+    width: 268px;
     max-width: calc(100vw - 24px);
     padding: 10px;
     border-radius: 10px;
