@@ -1552,7 +1552,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
       const existingMark = deps.getPlayerMark(String(playerId));
       const tabInfo = deps.getTabPlayerInfo(String(playerId));
       const autoName = deps.getTabPlayerName(String(playerId)) || name;
-      const autoMark = deps.autoTeamFromName(autoName);
+      // 优先使用包含城镇信息的显示名进行自动标记识别
+      const displayNameForAutoMark = (tabInfo && tabInfo.teamText) ? `[${tabInfo.teamText}] ${autoName}` : autoName;
+      const autoMark = deps.autoTeamFromName(displayNameForAutoMark);
       const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
       const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
       const isManualMark = Boolean(existingMark) && !existingActsAsAuto;

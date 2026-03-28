@@ -83,6 +83,28 @@ declare const unsafeWindow: Window | undefined;
 
     const friendlyTags = parseTagList(CONFIG.FRIENDLY_TAGS);
     const enemyTags = parseTagList(CONFIG.ENEMY_TAGS);
+
+    // 优先从 displayName 中提取方括号内的城镇名（如 [喀布尔]）进行标签匹配
+    const townNameMatch = name.match(/\[([^\]]+)\]/);
+    if (townNameMatch) {
+      const townName = townNameMatch[1];
+      if (friendlyTags.some((tag) => townName.includes(tag))) {
+        return {
+          team: 'friendly',
+          color: getConfiguredTeamColor('friendly', CONFIG),
+          label: '',
+        };
+      }
+      if (enemyTags.some((tag) => townName.includes(tag))) {
+        return {
+          team: 'enemy',
+          color: getConfiguredTeamColor('enemy', CONFIG),
+          label: '',
+        };
+      }
+    }
+
+    // 如果没有城镇名，则使用完整名称进行匹配（兼容旧逻辑）
     if (friendlyTags.some((tag) => name.includes(tag))) {
       return {
         team: 'friendly',
