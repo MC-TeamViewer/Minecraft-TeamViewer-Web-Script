@@ -71,6 +71,8 @@ export type BattleChunkData = {
   colorRaw: string;
   colorNote?: string | null;
   observedAt?: number | null;
+  positionSampledAt?: number | null;
+  alignmentSource?: string | null;
   reporterId?: string | null;
   roomCode?: string | null;
 };

@@ -932,7 +932,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const chunkX = Number(payload?.chunkX);
     const chunkZ = Number(payload?.chunkZ);
     const observedAt = Number(payload?.observedAt);
+    const positionSampledAt = Number(payload?.positionSampledAt);
+    const alignmentSource = escapeHtml(String(payload?.alignmentSource || '').trim() || '');
     const observedText = Number.isFinite(observedAt) ? new Date(observedAt).toLocaleString() : '-';
+    const sampledText = Number.isFinite(positionSampledAt) ? new Date(positionSampledAt).toLocaleString() : '-';
     const lines = [
       `<b>${escapeHtml(chunkId)}</b>`,
       `chunk: ${Number.isFinite(chunkX) ? Math.round(chunkX) : '?'} , ${Number.isFinite(chunkZ) ? Math.round(chunkZ) : '?'}`,
@@ -949,6 +952,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
       lines.push(`dim: ${dimension}`);
     }
     lines.push(`at: ${escapeHtml(observedText)}`);
+    if (alignmentSource) {
+      lines.push(`align: ${alignmentSource}`);
+    }
+    lines.push(`sampledAt: ${escapeHtml(sampledText)}`);
     return lines.join('<br />');
   }
 
@@ -1914,6 +1921,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
           colorRaw: (data as any).colorRaw || '',
           colorNote: (data as any).colorNote || '',
           observedAt: (data as any).observedAt || null,
+          positionSampledAt: (data as any).positionSampledAt || null,
+          alignmentSource: (data as any).alignmentSource || '',
         });
       }
     }
