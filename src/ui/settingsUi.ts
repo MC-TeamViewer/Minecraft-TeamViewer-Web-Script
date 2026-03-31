@@ -74,6 +74,7 @@ type OverlayFormState = {
   REPORTER_CHUNK_RADIUS: string;
   REPORTER_CHUNK_OPACITY: string;
   BATTLE_CHUNK_FILL_OPACITY: string;
+  BATTLE_CHUNK_SHOW_CORE_MARKER: boolean;
   BATTLE_CHUNK_SHOW_OUTLINE: boolean;
   BATTLE_CHUNK_DEBUG: boolean;
   AUTO_TEAM_FROM_NAME: boolean;
@@ -119,6 +120,7 @@ function createDefaultFormState(): OverlayFormState {
     REPORTER_CHUNK_RADIUS: '2',
     REPORTER_CHUNK_OPACITY: '0.11',
     BATTLE_CHUNK_FILL_OPACITY: '0.32',
+    BATTLE_CHUNK_SHOW_CORE_MARKER: true,
     BATTLE_CHUNK_SHOW_OUTLINE: true,
     BATTLE_CHUNK_DEBUG: false,
     AUTO_TEAM_FROM_NAME: true,
@@ -484,6 +486,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.form.REPORTER_CHUNK_RADIUS = String(config.REPORTER_CHUNK_RADIUS ?? 2);
     state.form.REPORTER_CHUNK_OPACITY = String(config.REPORTER_CHUNK_OPACITY ?? 0.11);
     state.form.BATTLE_CHUNK_FILL_OPACITY = String(config.BATTLE_CHUNK_FILL_OPACITY ?? 0.32);
+    state.form.BATTLE_CHUNK_SHOW_CORE_MARKER = Boolean(config.BATTLE_CHUNK_SHOW_CORE_MARKER);
     state.form.BATTLE_CHUNK_SHOW_OUTLINE = Boolean(config.BATTLE_CHUNK_SHOW_OUTLINE);
     state.form.BATTLE_CHUNK_DEBUG = Boolean(config.BATTLE_CHUNK_DEBUG);
     state.form.AUTO_TEAM_FROM_NAME = Boolean(config.AUTO_TEAM_FROM_NAME);
@@ -535,6 +538,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       REPORTER_CHUNK_COLOR: state.form.REPORTER_EFFECT_COLOR,
       REPORTER_CHUNK_OPACITY: state.form.REPORTER_CHUNK_OPACITY || config.REPORTER_CHUNK_OPACITY,
       BATTLE_CHUNK_FILL_OPACITY: state.form.BATTLE_CHUNK_FILL_OPACITY || config.BATTLE_CHUNK_FILL_OPACITY,
+      BATTLE_CHUNK_SHOW_CORE_MARKER: state.form.BATTLE_CHUNK_SHOW_CORE_MARKER,
       BATTLE_CHUNK_SHOW_OUTLINE: state.form.BATTLE_CHUNK_SHOW_OUTLINE,
       BATTLE_CHUNK_DEBUG: state.form.BATTLE_CHUNK_DEBUG,
       AUTO_TEAM_FROM_NAME: state.form.AUTO_TEAM_FROM_NAME,

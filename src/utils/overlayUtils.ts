@@ -232,6 +232,9 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   if (Number.isFinite(battleChunkFillOpacity)) {
     next.BATTLE_CHUNK_FILL_OPACITY = Math.max(0.02, Math.min(0.95, battleChunkFillOpacity));
   }
+  next.BATTLE_CHUNK_SHOW_CORE_MARKER = candidate.BATTLE_CHUNK_SHOW_CORE_MARKER === undefined
+    ? DEFAULT_CONFIG.BATTLE_CHUNK_SHOW_CORE_MARKER
+    : Boolean(candidate.BATTLE_CHUNK_SHOW_CORE_MARKER);
   next.BATTLE_CHUNK_SHOW_OUTLINE = candidate.BATTLE_CHUNK_SHOW_OUTLINE === undefined
     ? DEFAULT_CONFIG.BATTLE_CHUNK_SHOW_OUTLINE
     : Boolean(candidate.BATTLE_CHUNK_SHOW_OUTLINE);

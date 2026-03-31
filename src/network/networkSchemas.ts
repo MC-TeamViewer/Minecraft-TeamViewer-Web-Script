@@ -67,6 +67,7 @@ export type BattleChunkData = {
   chunkZ: number;
   dimension: string;
   symbol?: string | null;
+  markerType?: string | null;
   colorRaw: string;
   colorNote?: string | null;
   observedAt?: number | null;
