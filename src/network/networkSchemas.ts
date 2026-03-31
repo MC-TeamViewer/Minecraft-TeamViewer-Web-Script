@@ -62,6 +62,18 @@ export type WaypointData = {
   sourceType?: string | null;
 };
 
+export type BattleChunkData = {
+  chunkX: number;
+  chunkZ: number;
+  dimension: string;
+  symbol?: string | null;
+  colorRaw: string;
+  colorNote?: string | null;
+  observedAt?: number | null;
+  reporterId?: string | null;
+  roomCode?: string | null;
+};
+
 export const PLAYER_DATA_RELIABILITY: Record<string, boolean> = {
   x: false,
   y: false,
@@ -137,10 +149,17 @@ export type WaypointNode = {
   data?: WaypointData;
 } | WaypointData;
 
+export type BattleChunkNode = {
+  source?: string;
+  timestamp?: number;
+  data?: BattleChunkData;
+} | BattleChunkData;
+
 export type AdminSnapshot = {
   players: Record<string, PlayerNode>;
   entities: Record<string, EntityNode>;
   waypoints: Record<string, WaypointNode>;
+  battleChunks: Record<string, BattleChunkNode>;
   playerMarks: Record<string, any>;
   tabState: { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] };
   connections: string[];
@@ -242,6 +261,7 @@ export type SnapshotFullInboundPacket = {
   players?: Record<string, PlayerNode>;
   entities?: Record<string, EntityNode>;
   waypoints?: Record<string, WaypointNode>;
+  battleChunks?: Record<string, BattleChunkNode>;
   playerMarks?: Record<string, unknown>;
   tabState?: { enabled: boolean; roomCode?: string; reports: Record<string, any>; groups: any[] };
   connections?: string[];
@@ -268,6 +288,7 @@ export type PatchInboundPacket = {
   players?: ScopePatch;
   entities?: ScopePatch;
   waypoints?: ScopePatch;
+  battleChunks?: ScopePatch;
   playerMarks?: ScopePatch;
   meta?: Record<string, unknown>;
   server_time?: number | null;
@@ -286,6 +307,7 @@ export function createEmptyAdminSnapshotModel(): AdminSnapshot {
     players: {},
     entities: {},
     waypoints: {},
+    battleChunks: {},
     playerMarks: {},
     tabState: { enabled: false, roomCode: '', reports: {}, groups: [] },
     connections: [],

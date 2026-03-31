@@ -1,7 +1,7 @@
 export const USERSCRIPT_META = {
   name: '地图玩家投影-squaremap版',
   namespace: 'https://github.com/MC-TeamViewer',
-  version: '0.4.6',
+  version: '0.4.7',
   description: '将远程玩家信息投影到 squaremap 地图',
   author: 'Prof. Chen',
   license: 'MIT',
@@ -17,8 +17,8 @@ export const USERSCRIPT_META = {
 };
 
 export const PROTOCOL_META = {
-  adminNetworkProtocolVersion: '0.5.0',
-  adminMinCompatibleNetworkProtocolVersion: '0.5.0',
+  adminNetworkProtocolVersion: '0.6.0',
+  adminMinCompatibleNetworkProtocolVersion: '0.6.0',
 };
 
 export const APP_META = {

@@ -50,6 +50,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let tacticalPreviewMarker: any | null = null;
   const markersById = new Map<string, any>();
   const waypointsById = new Map<string, any>();
+  const battleChunkLayersById = new Map<string, any>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
@@ -839,6 +840,56 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return Math.max(0.02, Math.min(0.9, opacity));
   }
 
+  function getBattleChunkFillOpacity() {
+    const opacity = readNumber(CONFIG.BATTLE_CHUNK_FILL_OPACITY);
+    if (opacity === null) return 0.32;
+    return Math.max(0.02, Math.min(0.95, opacity));
+  }
+
+  function shouldShowBattleChunkOutline() {
+    return Boolean(CONFIG.BATTLE_CHUNK_SHOW_OUTLINE);
+  }
+
+  function shouldShowBattleChunkDebug() {
+    return Boolean(CONFIG.BATTLE_CHUNK_DEBUG);
+  }
+
+  function buildBattleChunkBounds(map: any, chunkX: number, chunkZ: number) {
+    const minX = chunkX * 16;
+    const maxX = (chunkX + 1) * 16;
+    const minZ = chunkZ * 16;
+    const maxZ = (chunkZ + 1) * 16;
+    return leafletRef.latLngBounds(
+      worldToLatLng(map, minX, minZ),
+      worldToLatLng(map, maxX, maxZ),
+    );
+  }
+
+  function buildBattleChunkTooltip(chunkId: string, payload: any) {
+    const symbol = escapeHtml(String(payload?.symbol || '').trim() || ' ');
+    const colorRaw = escapeHtml(String(payload?.colorRaw || '').trim() || '-');
+    const colorNote = escapeHtml(String(payload?.colorNote || '').trim() || '');
+    const dimension = escapeHtml(String(payload?.dimension || '').trim() || '');
+    const chunkX = Number(payload?.chunkX);
+    const chunkZ = Number(payload?.chunkZ);
+    const observedAt = Number(payload?.observedAt);
+    const observedText = Number.isFinite(observedAt) ? new Date(observedAt).toLocaleString() : '-';
+    const lines = [
+      `<b>${escapeHtml(chunkId)}</b>`,
+      `chunk: ${Number.isFinite(chunkX) ? Math.round(chunkX) : '?'} , ${Number.isFinite(chunkZ) ? Math.round(chunkZ) : '?'}`,
+      `symbol: ${symbol}`,
+      `color: ${colorRaw}`,
+    ];
+    if (colorNote) {
+      lines.push(`note: ${colorNote}`);
+    }
+    if (dimension) {
+      lines.push(`dim: ${dimension}`);
+    }
+    lines.push(`at: ${escapeHtml(observedText)}`);
+    return lines.join('<br />');
+  }
+
   function parseBooleanFlag(value: unknown) {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value !== 0;
@@ -1418,6 +1469,64 @@ export function createMapProjection(deps: MapProjectionDeps) {
     waypointsById.set(waypointId, marker);
   }
 
+  function upsertBattleChunk(map: any, chunkId: string, payload: any) {
+    if (!payload || typeof payload !== 'object' || !Boolean(CONFIG.SHOW_BATTLE_CHUNK_LAYER)) {
+      const existing = battleChunkLayersById.get(chunkId);
+      if (existing) {
+        try { existing.remove(); } catch (_) {}
+        battleChunkLayersById.delete(chunkId);
+      }
+      return;
+    }
+
+    const chunkX = readNumber(payload.chunkX);
+    const chunkZ = readNumber(payload.chunkZ);
+    if (chunkX === null || chunkZ === null) {
+      return;
+    }
+
+    const color = normalizeColor(payload.colorRaw, '#ffffff');
+    const fillOpacity = getBattleChunkFillOpacity();
+    const showOutline = shouldShowBattleChunkOutline();
+    const style = {
+      color,
+      weight: showOutline ? 0.8 : 0,
+      opacity: showOutline ? Math.max(0.35, Math.min(1, fillOpacity + 0.35)) : 0,
+      fillColor: color,
+      fillOpacity,
+      interactive: shouldShowBattleChunkDebug(),
+      bubblingMouseEvents: false,
+    };
+    const bounds = buildBattleChunkBounds(map, Math.floor(chunkX), Math.floor(chunkZ));
+    const existing = battleChunkLayersById.get(chunkId);
+
+    if (existing) {
+      try {
+        existing.setBounds(bounds);
+        existing.setStyle(style);
+        if (shouldShowBattleChunkDebug()) {
+          const tooltipHtml = buildBattleChunkTooltip(chunkId, payload);
+          if (typeof existing.bindTooltip === 'function') {
+            existing.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
+          }
+        } else if (typeof existing.unbindTooltip === 'function') {
+          existing.unbindTooltip();
+        }
+        return;
+      } catch (_) {
+        try { existing.remove(); } catch (_) {}
+        battleChunkLayersById.delete(chunkId);
+      }
+    }
+
+    const layer = leafletRef.rectangle(bounds, style);
+    if (shouldShowBattleChunkDebug() && typeof layer.bindTooltip === 'function') {
+      layer.bindTooltip(buildBattleChunkTooltip(chunkId, payload), { sticky: true, direction: 'top', opacity: 0.95 });
+    }
+    layer.addTo(map);
+    battleChunkLayersById.set(chunkId, layer);
+  }
+
   function removeMissingMarkers(nextIds: Set<string>) {
     for (const [playerId, marker] of markersById.entries()) {
       if (nextIds.has(playerId)) continue;
@@ -1432,6 +1541,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { marker.remove(); } catch (_) {}
       waypointsById.delete(wpId);
       trackedWaypointPositions.delete(wpId);
+    }
+  }
+
+  function removeMissingBattleChunks(nextIds: Set<string>) {
+    for (const [chunkId, layer] of battleChunkLayersById.entries()) {
+      if (nextIds.has(chunkId)) continue;
+      try { layer.remove(); } catch (_) {}
+      battleChunkLayersById.delete(chunkId);
     }
   }
 
@@ -1524,89 +1641,85 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function applySnapshotPlayers(map: any, snapshot: any) {
     const players = snapshot && typeof snapshot === 'object' ? snapshot.players : null;
-    if (!players || typeof players !== 'object') {
-      removeMissingMarkers(new Set());
-      removeMissingReporterEffects(new Set());
-      return;
-    }
-
     const wantedDim = normalizeDimension(CONFIG.TARGET_DIMENSION);
     const nextIds = new Set<string>();
     const nextPlayerIds = new Set<string>();
     const autoMarkSyncCandidates: any[] = [];
     const reporterIdentities = getReportingPlayerIdentities(snapshot);
 
-    for (const [playerId, rawNode] of Object.entries(players)) {
-      const data = getPlayerDataNode(rawNode);
-      if (!data) continue;
+    if (players && typeof players === 'object') {
+      for (const [playerId, rawNode] of Object.entries(players)) {
+        const data = getPlayerDataNode(rawNode);
+        if (!data) continue;
 
-      const dim = normalizeDimension(data.dimension);
-      if (wantedDim && dim !== wantedDim) continue;
+        const dim = normalizeDimension(data.dimension);
+        if (wantedDim && dim !== wantedDim) continue;
 
-      const x = readNumber(data.x);
-      const z = readNumber(data.z);
-      if (x === null || z === null) continue;
+        const x = readNumber(data.x);
+        const z = readNumber(data.z);
+        if (x === null || z === null) continue;
 
-      const health = readNumber(data.health);
-      const name = String(data.playerName || data.playerUUID || playerId);
-      const existingMark = deps.getPlayerMark(String(playerId));
-      const tabInfo = deps.getTabPlayerInfo(String(playerId));
-      const autoName = deps.getTabPlayerName(String(playerId)) || name;
-      // 优先使用包含城镇信息的显示名进行自动标记识别
-      const displayNameForAutoMark = (tabInfo && tabInfo.teamText) ? `[${tabInfo.teamText}] ${autoName}` : autoName;
-      const autoMark = deps.autoTeamFromName(displayNameForAutoMark);
-      const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
-      const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
-      const isManualMark = Boolean(existingMark) && !existingActsAsAuto;
+        const health = readNumber(data.health);
+        const name = String(data.playerName || data.playerUUID || playerId);
+        const existingMark = deps.getPlayerMark(String(playerId));
+        const tabInfo = deps.getTabPlayerInfo(String(playerId));
+        const autoName = deps.getTabPlayerName(String(playerId)) || name;
+        // 优先使用包含城镇信息的显示名进行自动标记识别
+        const displayNameForAutoMark = (tabInfo && tabInfo.teamText) ? `[${tabInfo.teamText}] ${autoName}` : autoName;
+        const autoMark = deps.autoTeamFromName(displayNameForAutoMark);
+        const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
+        const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
+        const isManualMark = Boolean(existingMark) && !existingActsAsAuto;
 
-      if (isManualMark) {
-        // best-effort: keep auto cache clean via clear candidate logic
-      }
+        if (isManualMark) {
+          // best-effort: keep auto cache clean via clear candidate logic
+        }
 
-      if (!isManualMark) {
-        if (autoMark && (autoMark.team === 'friendly' || autoMark.team === 'enemy')) {
-          const desiredTeam = normalizeTeam(autoMark.team);
-          const desiredColor = normalizeColor(autoMark.color, deps.getConfiguredTeamColor(desiredTeam));
-          const hasSameAutoMark = Boolean(existingMark)
-            && existingActsAsAuto
-            && normalizeTeam(existingMark.team) === desiredTeam
-            && normalizeColor(existingMark.color, deps.getConfiguredTeamColor(desiredTeam)) === desiredColor;
+        if (!isManualMark) {
+          if (autoMark && (autoMark.team === 'friendly' || autoMark.team === 'enemy')) {
+            const desiredTeam = normalizeTeam(autoMark.team);
+            const desiredColor = normalizeColor(autoMark.color, deps.getConfiguredTeamColor(desiredTeam));
+            const hasSameAutoMark = Boolean(existingMark)
+              && existingActsAsAuto
+              && normalizeTeam(existingMark.team) === desiredTeam
+              && normalizeColor(existingMark.color, deps.getConfiguredTeamColor(desiredTeam)) === desiredColor;
 
-          if (!hasSameAutoMark) {
+            if (!hasSameAutoMark) {
+              autoMarkSyncCandidates.push({
+                action: 'set',
+                playerId,
+                team: desiredTeam,
+                color: desiredColor,
+              });
+            }
+          } else if (existingActsAsAuto) {
             autoMarkSyncCandidates.push({
-              action: 'set',
+              action: 'clear',
               playerId,
-              team: desiredTeam,
-              color: desiredColor,
             });
           }
-        } else if (existingActsAsAuto) {
-          autoMarkSyncCandidates.push({
-            action: 'clear',
-            playerId,
-          });
         }
-      }
 
-      const effectiveMark = isManualMark
-        ? existingMark
-        : (autoMark || (existingActsAsAuto ? null : existingMark));
+        const effectiveMark = isManualMark
+          ? existingMark
+          : (autoMark || (existingActsAsAuto ? null : existingMark));
 
-      const townInfo = tabInfo && tabInfo.teamText
-        ? {
-            text: tabInfo.teamText,
-            color: tabInfo.teamColor || null,
-          }
-        : null;
-      const isReporter = isReportingPlayer(String(playerId), rawNode, data, reporterIdentities);
-      const isRiding = parseBooleanFlag((data as any).isRiding);
+        const townInfo = tabInfo && tabInfo.teamText
+          ? {
+              text: tabInfo.teamText,
+              color: tabInfo.teamColor || null,
+            }
+          : null;
+        const isReporter = isReportingPlayer(String(playerId), rawNode, data, reporterIdentities);
+        const isRiding = parseBooleanFlag((data as any).isRiding);
 
-      nextIds.add(String(playerId));
-      nextPlayerIds.add(String(playerId));
-      upsertMarker(map, String(playerId), { x, z, health, name, mark: effectiveMark, townInfo, isReporter, isRiding });
-      try {
-        upsertReporterEffects(map, String(playerId), { x, z, mark: effectiveMark }, isReporter);
-      } catch (_) {
+        nextIds.add(String(playerId));
+        nextPlayerIds.add(String(playerId));
+        upsertMarker(map, String(playerId), { x, z, health, name, mark: effectiveMark, townInfo, isReporter, isRiding });
+        try {
+          upsertReporterEffects(map, String(playerId), { x, z, mark: effectiveMark }, isReporter);
+        } catch (_) {
+        }
       }
     }
 
@@ -1694,8 +1807,35 @@ export function createMapProjection(deps: MapProjectionDeps) {
       }
     }
 
+    const battleChunks = snapshot && typeof snapshot === 'object' ? snapshot.battleChunks : null;
+    const nextBattleChunkIds = new Set<string>();
+    if (battleChunks && typeof battleChunks === 'object' && Boolean(CONFIG.SHOW_BATTLE_CHUNK_LAYER)) {
+      for (const [chunkId, rawNode] of Object.entries(battleChunks)) {
+        if (!rawNode || typeof rawNode !== 'object') continue;
+        const data = (rawNode as any).data && typeof (rawNode as any).data === 'object' ? (rawNode as any).data : rawNode;
+        const dim = normalizeDimension((data as any).dimension);
+        if (wantedDim && dim !== wantedDim) continue;
+
+        const chunkX = readNumber((data as any).chunkX);
+        const chunkZ = readNumber((data as any).chunkZ);
+        if (chunkX === null || chunkZ === null) continue;
+
+        nextBattleChunkIds.add(String(chunkId));
+        upsertBattleChunk(map, String(chunkId), {
+          chunkX,
+          chunkZ,
+          dimension: dim,
+          symbol: (data as any).symbol || '',
+          colorRaw: (data as any).colorRaw || '',
+          colorNote: (data as any).colorNote || '',
+          observedAt: (data as any).observedAt || null,
+        });
+      }
+    }
+
     removeMissingMarkers(nextIds);
     removeMissingWaypoints(nextWaypointIds);
+    removeMissingBattleChunks(nextBattleChunkIds);
     removeMissingReporterEffects(nextPlayerIds);
     rebuildReporterEffectLayers(map);
     deps.maybeSyncAutoDetectedMarks(autoMarkSyncCandidates);
@@ -1703,6 +1843,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     (PAGE as any).__NODEMC_PLAYER_OVERLAY__ = {
       playersOnMap: markersById.size,
       waypointsOnMap: waypointsById.size,
+      battleChunksOnMap: battleChunkLayersById.size,
       source: CONFIG.ADMIN_WS_URL,
       dimension: CONFIG.TARGET_DIMENSION,
       wsConnected: deps.getWsConnected(),
@@ -1760,6 +1901,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return {
       markers: markersById.size,
       waypoints: waypointsById.size,
+      battleChunks: battleChunkLayersById.size,
     };
   }
 
@@ -1777,6 +1919,11 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { m.remove(); } catch (_) {}
     }
     waypointsById.clear();
+
+    for (const layer of battleChunkLayersById.values()) {
+      try { layer.remove(); } catch (_) {}
+    }
+    battleChunkLayersById.clear();
 
     for (const layer of reporterEffectLayersByStyle.values()) {
       try { layer.remove(); } catch (_) {}

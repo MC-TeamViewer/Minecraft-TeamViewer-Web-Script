@@ -1,6 +1,7 @@
 import {
   DEFAULT_CONFIG,
   MC_COLOR_CODE_MAP,
+  MC_NAMED_COLOR_MAP,
   TEAM_CONFIG_COLOR_FIELD,
   TEAM_DEFAULT_COLORS,
 } from '../constants';
@@ -76,6 +77,10 @@ export function normalizeColor(colorValue: unknown, fallbackColor: string) {
   }
   const text = String(colorValue || '').trim();
   if (!text) return fallback;
+  const normalizedNamed = text.toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(MC_NAMED_COLOR_MAP, normalizedNamed)) {
+    return MC_NAMED_COLOR_MAP[normalizedNamed as keyof typeof MC_NAMED_COLOR_MAP];
+  }
   const raw = text.startsWith('#') ? text.slice(1) : text;
   if (/^[0-9a-fA-F]{6}$/.test(raw)) {
     return `#${raw.toLowerCase()}`;
@@ -148,6 +153,9 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   next.SHOW_WAYPOINT_TEXT = candidate.SHOW_WAYPOINT_TEXT === undefined
     ? DEFAULT_CONFIG.SHOW_WAYPOINT_TEXT
     : Boolean(candidate.SHOW_WAYPOINT_TEXT);
+  next.SHOW_BATTLE_CHUNK_LAYER = candidate.SHOW_BATTLE_CHUNK_LAYER === undefined
+    ? DEFAULT_CONFIG.SHOW_BATTLE_CHUNK_LAYER
+    : Boolean(candidate.SHOW_BATTLE_CHUNK_LAYER);
   next.BLOCK_MAP_LEFT_RIGHT_CLICK = candidate.BLOCK_MAP_LEFT_RIGHT_CLICK === undefined
     ? DEFAULT_CONFIG.BLOCK_MAP_LEFT_RIGHT_CLICK
     : Boolean(candidate.BLOCK_MAP_LEFT_RIGHT_CLICK);
@@ -220,6 +228,16 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   if (Number.isFinite(reporterChunkOpacity)) {
     next.REPORTER_CHUNK_OPACITY = Math.max(0.02, Math.min(0.9, reporterChunkOpacity));
   }
+  const battleChunkFillOpacity = Number(candidate.BATTLE_CHUNK_FILL_OPACITY);
+  if (Number.isFinite(battleChunkFillOpacity)) {
+    next.BATTLE_CHUNK_FILL_OPACITY = Math.max(0.02, Math.min(0.95, battleChunkFillOpacity));
+  }
+  next.BATTLE_CHUNK_SHOW_OUTLINE = candidate.BATTLE_CHUNK_SHOW_OUTLINE === undefined
+    ? DEFAULT_CONFIG.BATTLE_CHUNK_SHOW_OUTLINE
+    : Boolean(candidate.BATTLE_CHUNK_SHOW_OUTLINE);
+  next.BATTLE_CHUNK_DEBUG = candidate.BATTLE_CHUNK_DEBUG === undefined
+    ? DEFAULT_CONFIG.BATTLE_CHUNK_DEBUG
+    : Boolean(candidate.BATTLE_CHUNK_DEBUG);
   next.AUTO_TEAM_FROM_NAME = candidate.AUTO_TEAM_FROM_NAME === undefined
     ? DEFAULT_CONFIG.AUTO_TEAM_FROM_NAME
     : Boolean(candidate.AUTO_TEAM_FROM_NAME);

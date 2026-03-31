@@ -23,6 +23,7 @@ type OverviewState = {
   wsConnected: boolean;
   hasError: boolean;
   markerCount: number;
+  battleChunkCount: number;
   onlinePlayerCount: number;
   mapPlayerCount: number;
   roomCode: string;
@@ -64,6 +65,7 @@ type OverlayUiState = {
     ENABLE_TACTICAL_MAP_MARKING: boolean;
     TACTICAL_MARK_DEFAULT_TTL_SECONDS: string;
     BLOCK_MAP_HOVER_POPUP: boolean;
+    SHOW_BATTLE_CHUNK_LAYER: boolean;
     PLAYER_ICON_SIZE: string;
     PLAYER_TEXT_SIZE: string;
     HORSE_ICON_SIZE: string;
@@ -77,6 +79,9 @@ type OverlayUiState = {
     REPORTER_CHUNK_AREA_ENABLED: boolean;
     REPORTER_CHUNK_RADIUS: string;
     REPORTER_CHUNK_OPACITY: string;
+    BATTLE_CHUNK_FILL_OPACITY: string;
+    BATTLE_CHUNK_SHOW_OUTLINE: boolean;
+    BATTLE_CHUNK_DEBUG: boolean;
     AUTO_TEAM_FROM_NAME: boolean;
     FRIENDLY_TAGS: string;
     ENEMY_TAGS: string;
@@ -278,6 +283,10 @@ function applyQuickLabel(label: string) {
         <div class="n-metric-label">地图标注数</div>
         <div class="n-metric-value">{{ state.overview.markerCount }}</div>
       </div>
+      <div class="n-metric-card">
+        <div class="n-metric-label">战局区块</div>
+        <div class="n-metric-value">{{ state.overview.battleChunkCount }}</div>
+      </div>
     </div>
 
     <div class="n-card n-overview-card">
@@ -470,6 +479,7 @@ function applyQuickLabel(label: string) {
       <label class="n-check"><input v-model="state.form.SHOW_LABEL_TEAM_INFO" @change="triggerAutoApply" id="nodemc-overlay-show-team-info" type="checkbox" />地图文字显示阵营信息</label>
       <label class="n-check"><input v-model="state.form.SHOW_LABEL_TOWN_INFO" @change="triggerAutoApply" id="nodemc-overlay-show-town-info" type="checkbox" />地图文字显示城镇信息</label>
       <label class="n-check"><input v-model="state.form.SHOW_COORDS" @change="triggerAutoApply" id="nodemc-overlay-coords" type="checkbox" />显示坐标</label>
+      <label class="n-check"><input v-model="state.form.SHOW_BATTLE_CHUNK_LAYER" @change="triggerAutoApply" id="nodemc-overlay-show-battle-chunk-layer" type="checkbox" />显示战局区块色块层</label>
     </div>
 
     <div class="n-card">
@@ -515,6 +525,16 @@ function applyQuickLabel(label: string) {
           <input v-model="state.form.TEAM_COLOR_ENEMY" @input="markDisplayInputsDirty" id="nodemc-overlay-team-enemy-color" type="text" placeholder="#ef4444" />
         </div>
       </div>
+    </div>
+
+    <div class="n-card">
+      <div class="n-subtitle">战局区块层</div>
+      <div class="n-row">
+        <label>色块透明度（0.02 ~ 0.95）</label>
+        <input v-model="state.form.BATTLE_CHUNK_FILL_OPACITY" @input="markDisplayInputsDirty" id="nodemc-overlay-battle-chunk-opacity" type="number" min="0.02" max="0.95" step="0.01" />
+      </div>
+      <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_SHOW_OUTLINE" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-outline" type="checkbox" />显示区块描边</label>
+      <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_DEBUG" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-debug" type="checkbox" />显示战局区块调试信息</label>
     </div>
 
     <div class="n-card">

@@ -481,6 +481,7 @@ declare const unsafeWindow: Window | undefined;
         Object.assign(CONFIG, parsed.config);
         saveConfigToStorage();
         settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
+        mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
         wsClient?.reconnect();
         refreshPlayerLists();
         lastErrorText = null;
@@ -502,13 +503,14 @@ declare const unsafeWindow: Window | undefined;
     const mapCounts = mapProjection.getCounts();
     const lastErr = lastErrorText ? `错误: ${lastErrorText}` : '正常';
     const wsText = wsConnected ? '已连接' : '未连接';
-    const annotations = mapCounts.markers + mapCounts.waypoints;
+    const annotations = mapCounts.markers + mapCounts.waypoints + mapCounts.battleChunks;
     const serverFilterText = sameServerFilterEnabled ? '同服过滤:开' : '同服过滤:关';
     settingsUi.updateStatus(`状态: ${lastErr} | WS: ${wsText} | 标注: ${annotations} | ${serverFilterText}`,
       {
         wsConnected,
         hasError: Boolean(lastErrorText),
         markerCount: annotations,
+        battleChunkCount: mapCounts.battleChunks,
         roomCode: CONFIG.ROOM_CODE,
         targetDimension: CONFIG.TARGET_DIMENSION,
       });
@@ -559,6 +561,7 @@ declare const unsafeWindow: Window | undefined;
     Object.assign(CONFIG, next);
     saveConfigToStorage();
     mapProjection.ensureMapInteractionGuard();
+    mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
     updateUiStatus();
   }
 
@@ -661,6 +664,7 @@ declare const unsafeWindow: Window | undefined;
       Object.assign(CONFIG, DEFAULT_CONFIG);
       saveConfigToStorage();
       settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
+      mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
       wsClient?.reconnect();
       updateUiStatus();
     },
@@ -718,8 +722,10 @@ declare const unsafeWindow: Window | undefined;
           playersCount: snapshot.players ? Object.keys(snapshot.players).length : 0,
           entitiesCount: snapshot.entities ? Object.keys(snapshot.entities).length : 0,
           waypointsCount: snapshot.waypoints ? Object.keys(snapshot.waypoints).length : 0,
+          battleChunksCount: snapshot.battleChunks ? Object.keys(snapshot.battleChunks).length : 0,
           markersOnMap: mapCounts.markers,
           waypointsOnMap: mapCounts.waypoints,
+          battleChunksOnMap: mapCounts.battleChunks,
           lastAdminMessageType,
           lastAdminMessageAt,
         };

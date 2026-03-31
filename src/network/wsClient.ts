@@ -95,6 +95,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
         players: (message.players && typeof message.players === 'object') ? message.players : {},
         entities: (message.entities && typeof message.entities === 'object') ? message.entities : {},
         waypoints: (message.waypoints && typeof message.waypoints === 'object') ? message.waypoints : {},
+        battleChunks: (message.battleChunks && typeof message.battleChunks === 'object') ? message.battleChunks : {},
         playerMarks: (message.playerMarks && typeof message.playerMarks === 'object') ? message.playerMarks : {},
         tabState: (message.tabState && typeof message.tabState === 'object') ? message.tabState : { enabled: false, reports: {}, groups: [] },
         connections: Array.isArray(message.connections) ? message.connections : [],
@@ -116,7 +117,8 @@ export function createAdminWsClient(deps: WsClientDeps) {
 
     const needResync =
       shouldResyncForScopeMissingBaseline(latestSnapshot.players, message.players, ['x', 'y', 'z', 'dimension']) ||
-      shouldResyncForScopeMissingBaseline(latestSnapshot.entities, message.entities, ['x', 'y', 'z', 'dimension']);
+      shouldResyncForScopeMissingBaseline(latestSnapshot.entities, message.entities, ['x', 'y', 'z', 'dimension']) ||
+      shouldResyncForScopeMissingBaseline(latestSnapshot.battleChunks, message.battleChunks, ['chunkX', 'chunkZ', 'dimension', 'colorRaw']);
     if (needResync) {
       requestResync('patch_missing_baseline');
     }
@@ -124,6 +126,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     latestSnapshot.players = applyScopePatchMap(latestSnapshot.players, message.players, ['x', 'y', 'z', 'dimension']);
     latestSnapshot.entities = applyScopePatchMap(latestSnapshot.entities, message.entities, ['x', 'y', 'z', 'dimension']);
     latestSnapshot.waypoints = applyScopePatchMap(latestSnapshot.waypoints, message.waypoints);
+    latestSnapshot.battleChunks = applyScopePatchMap(latestSnapshot.battleChunks, message.battleChunks, ['chunkX', 'chunkZ', 'dimension', 'colorRaw']);
     latestSnapshot.playerMarks = applyScopePatchMap(latestSnapshot.playerMarks, message.playerMarks);
 
     const meta = (message.meta && typeof message.meta === 'object') ? message.meta : {};
