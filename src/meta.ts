@@ -1,8 +1,8 @@
 export const USERSCRIPT_META = {
-  name: '地图玩家投影-squaremap版',
-  namespace: 'https://github.com/MC-TeamViewer',
+  name: 'TeamViewRelay 地图投影-squaremap版',
+  namespace: 'team-view-relay',
   version: '0.4.7',
-  description: '将远程玩家信息投影到 squaremap 地图',
+  description: '将 TeamViewRelay 的远程玩家与战局区块信息投影到 squaremap 地图',
   author: 'Prof. Chen',
   license: 'MIT',
   match: [
@@ -17,11 +17,11 @@ export const USERSCRIPT_META = {
 };
 
 export const PROTOCOL_META = {
-  adminNetworkProtocolVersion: '0.6.0',
-  adminMinCompatibleNetworkProtocolVersion: '0.6.0',
+  adminNetworkProtocolVersion: '0.5.1',
+  adminMinCompatibleNetworkProtocolVersion: '0.5.0',
 };
 
 export const APP_META = {
-  storageKey: 'nodemc_player_overlay_settings_v1',
-  localProgramPrefix: 'map-overlay',
+  storageKey: 'team_view_relay_overlay_settings_v1',
+  localProgramPrefix: 'team-view-relay-overlay',
 };

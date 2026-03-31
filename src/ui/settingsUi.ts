@@ -135,7 +135,7 @@ function createDefaultFormState(): OverlayFormState {
 
 export function createSettingsUi(deps: SettingsUiDeps) {
   const PAGE = deps.page;
-  const ROOT_HOST_ID = 'teamviewer-overlay-root';
+  const ROOT_HOST_ID = 'team-view-relay-overlay-root';
 
   let uiMounted = false;
   let panelVisible = false;
@@ -311,7 +311,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     const fab = document.createElement('div');
     fab.id = 'nodemc-overlay-fab';
     fab.textContent = '⚙';
-    fab.title = 'NodeMC Overlay 设置';
+    fab.title = 'TeamViewRelay Overlay 设置';
 
     const panel = document.createElement('div');
     panel.id = 'nodemc-overlay-panel';

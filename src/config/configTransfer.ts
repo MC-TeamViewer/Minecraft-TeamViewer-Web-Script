@@ -4,7 +4,7 @@ import {
 } from '../constants';
 import { sanitizeConfig } from '../utils/overlayUtils';
 
-const EXPORT_KIND = 'nodemc_overlay_config_export';
+const EXPORT_KIND = 'team_view_relay_overlay_config_export';
 const EXPORT_SCHEMA_VERSION = 1;
 
 type ExportPayload = {
@@ -101,7 +101,7 @@ export function parseImportedConfigText(rawText: string): ParseResult {
 export function buildExportFileName() {
   const compatVersion = getCurrentCompatVersion().replace(/[^0-9a-zA-Z._-]/g, '_');
   const stamp = new Date().toISOString().replace(/[:]/g, '-');
-  return `nodemc-overlay-config-v${compatVersion}-${stamp}.json`;
+  return `team-view-relay-overlay-config-v${compatVersion}-${stamp}.json`;
 }
 
 export function getConfigCompatVersion() {

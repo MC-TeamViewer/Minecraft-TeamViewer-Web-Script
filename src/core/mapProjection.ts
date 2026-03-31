@@ -711,7 +711,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       });
     } catch (error) {
       if (CONFIG.DEBUG) {
-        console.warn('[NodeMC Player Overlay] hook window.L failed, fallback to direct access:', error);
+        console.warn('[TeamViewRelay Overlay] hook window.L failed, fallback to direct access:', error);
       }
     }
 
@@ -1840,7 +1840,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     rebuildReporterEffectLayers(map);
     deps.maybeSyncAutoDetectedMarks(autoMarkSyncCandidates);
 
-    (PAGE as any).__NODEMC_PLAYER_OVERLAY__ = {
+    const overlayState = {
       playersOnMap: markersById.size,
       waypointsOnMap: waypointsById.size,
       battleChunksOnMap: battleChunkLayersById.size,
@@ -1849,6 +1849,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
       wsConnected: deps.getWsConnected(),
       playerMarks: deps.getLatestPlayerMarks(),
     };
+    (PAGE as any).__TEAM_VIEW_RELAY_OVERLAY__ = overlayState;
+    (PAGE as any).__NODEMC_PLAYER_OVERLAY__ = overlayState;
   }
 
   function isMapReady() {

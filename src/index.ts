@@ -406,7 +406,7 @@ declare const unsafeWindow: Window | undefined;
       const normalized = sanitizeConfig(parsed);
       Object.assign(CONFIG, normalized);
     } catch (error) {
-      console.warn('[NodeMC Player Overlay] load settings failed:', error);
+      console.warn('[TeamViewRelay Overlay] load settings failed:', error);
     }
   }
 
@@ -414,7 +414,7 @@ declare const unsafeWindow: Window | undefined;
     try {
       PAGE.localStorage.setItem(STORAGE_KEY, JSON.stringify(CONFIG));
     } catch (error) {
-      console.warn('[NodeMC Player Overlay] save settings failed:', error);
+      console.warn('[TeamViewRelay Overlay] save settings failed:', error);
     }
   }
 
@@ -431,7 +431,7 @@ declare const unsafeWindow: Window | undefined;
       URL.revokeObjectURL(objectUrl);
       return true;
     } catch (error) {
-      console.warn('[NodeMC Player Overlay] export config failed:', error);
+      console.warn('[TeamViewRelay Overlay] export config failed:', error);
       return false;
     }
   }
@@ -487,7 +487,7 @@ declare const unsafeWindow: Window | undefined;
         lastErrorText = null;
         updateUiStatus();
       } catch (error) {
-        console.warn('[NodeMC Player Overlay] import config failed:', error);
+        console.warn('[TeamViewRelay Overlay] import config failed:', error);
         lastErrorText = '配置导入失败：读取文件异常';
         updateUiStatus();
       } finally {
@@ -779,6 +779,8 @@ declare const unsafeWindow: Window | undefined;
       },
     };
 
+    PAGE.__TEAM_VIEW_RELAY_OVERLAY_DEBUG__ = debugApi;
+    PAGE.teamViewRelayDebug = debugApi;
     PAGE.__NODEMC_OVERLAY_DEBUG__ = debugApi;
     PAGE.nodemcDebug = debugApi;
   }
@@ -792,7 +794,10 @@ declare const unsafeWindow: Window | undefined;
 
       try { const s2 = document.getElementById('nodemc-projection-style'); if (s2) s2.remove(); } catch (_) {}
 
+      try { delete PAGE.__TEAM_VIEW_RELAY_OVERLAY_DEBUG__; } catch (_) {}
+      try { delete PAGE.teamViewRelayDebug; } catch (_) {}
       try { delete PAGE.__NODEMC_OVERLAY_DEBUG__; } catch (_) {}
+      try { delete PAGE.__TEAM_VIEW_RELAY_OVERLAY__; } catch (_) {}
       try { delete PAGE.__NODEMC_PLAYER_OVERLAY__; } catch (_) {}
 
       overlayStarted = false;
@@ -877,7 +882,7 @@ declare const unsafeWindow: Window | undefined;
     syncUiOnReady();
 
     if (CONFIG.DEBUG) {
-      console.log('[NodeMC Player Overlay] boot', {
+      console.log('[TeamViewRelay Overlay] boot', {
         wsUrl: CONFIG.ADMIN_WS_URL,
         reconnectMs: CONFIG.RECONNECT_INTERVAL_MS,
       });
