@@ -51,7 +51,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const markersById = new Map<string, any>();
   const waypointsById = new Map<string, any>();
   const battleChunkLayersById = new Map<string, any>();
-  const battleChunkCoreMarkersById = new Map<string, any>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
@@ -847,8 +846,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return Math.max(0.02, Math.min(0.95, opacity));
   }
 
-  function shouldShowBattleChunkCoreMarker() {
-    return Boolean(CONFIG.BATTLE_CHUNK_SHOW_CORE_MARKER);
+  function shouldHighlightBattleChunkCore() {
+    return Boolean(CONFIG.BATTLE_CHUNK_HIGHLIGHT_CORE);
   }
 
   function shouldShowBattleChunkOutline() {
@@ -870,57 +869,44 @@ export function createMapProjection(deps: MapProjectionDeps) {
     );
   }
 
-  function buildBattleChunkCenterLatLng(map: any, chunkX: number, chunkZ: number) {
-    return worldToLatLng(map, (chunkX + 0.5) * 16, (chunkZ + 0.5) * 16);
-  }
+  function buildBattleChunkStyle(payload: any) {
+    const color = normalizeColor(payload?.colorRaw, '#ffffff');
+    const fillOpacity = getBattleChunkFillOpacity();
+    const showOutline = shouldShowBattleChunkOutline();
+    const markerType = String(payload?.markerType || '').trim();
+    const renderMode = markerType === 'war_core' && shouldHighlightBattleChunkCore()
+      ? 'core_outline'
+      : 'normal_chunk';
+    const coreOutlineColor = normalizeColor(CONFIG.BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR, '#FF4DFF');
 
-  function removeBattleChunkCoreMarker(chunkId: string) {
-    const existing = battleChunkCoreMarkersById.get(chunkId);
-    if (!existing) return;
-    try { existing.remove(); } catch (_) {}
-    battleChunkCoreMarkersById.delete(chunkId);
-  }
-
-  function buildBattleChunkCoreHtml(color: string, symbol: string) {
-    const coreColor = normalizeColor(color, '#facc15');
-    const safeSymbol = escapeHtml(symbol || '✦');
-    return `
-      <div style="position:relative;width:18px;height:18px;transform:translate(-9px,-9px);pointer-events:none;">
-        <span style="position:absolute;inset:1px;border-radius:999px;border:1.5px solid ${coreColor};box-shadow:0 0 0 1px rgba(15,23,42,.86),0 0 10px ${coreColor}66;background:rgba(15,23,42,.08);"></span>
-        <span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-55%);font-size:11px;line-height:1;color:${coreColor};font-weight:800;text-shadow:0 0 2px rgba(15,23,42,.95),0 0 6px rgba(255,255,255,.5);">${safeSymbol}</span>
-      </div>
-    `;
-  }
-
-  function upsertBattleChunkCoreMarker(map: any, chunkId: string, chunkX: number, chunkZ: number, color: string, symbol: string) {
-    const latLng = buildBattleChunkCenterLatLng(map, chunkX, chunkZ);
-    const html = buildBattleChunkCoreHtml(color, symbol);
-    const existing = battleChunkCoreMarkersById.get(chunkId);
-
-    if (existing) {
-      try {
-        existing.setLatLng(latLng);
-        if (typeof existing.setZIndexOffset === 'function') {
-          existing.setZIndexOffset(getWaypointZIndexOffset() + 150);
-        }
-        existing.setIcon(
-          leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
-        );
-        return;
-      } catch (_) {
-        try { existing.remove(); } catch (_) {}
-        battleChunkCoreMarkersById.delete(chunkId);
-      }
+    if (renderMode === 'core_outline') {
+      return {
+        renderMode,
+        style: {
+          color: coreOutlineColor,
+          weight: showOutline ? 3.2 : 2.6,
+          opacity: showOutline ? 0.98 : 0.94,
+          fillColor: color,
+          fillOpacity: Math.max(0.16, Math.min(0.72, fillOpacity)),
+          interactive: shouldShowBattleChunkDebug(),
+          bubblingMouseEvents: false,
+          className: 'tv-battle-chunk-core-outline',
+        },
+      };
     }
 
-    const marker = leafletRef.marker(latLng, {
-      icon: leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] }),
-      zIndexOffset: getWaypointZIndexOffset() + 150,
-      interactive: false,
-      keyboard: false,
-    });
-    marker.addTo(map);
-    battleChunkCoreMarkersById.set(chunkId, marker);
+    return {
+      renderMode,
+      style: {
+        color,
+        weight: showOutline ? 0.8 : 0,
+        opacity: showOutline ? Math.max(0.35, Math.min(1, fillOpacity + 0.35)) : 0,
+        fillColor: color,
+        fillOpacity,
+        interactive: shouldShowBattleChunkDebug(),
+        bubblingMouseEvents: false,
+      },
+    };
   }
 
   function buildBattleChunkTooltip(chunkId: string, payload: any) {
@@ -934,6 +920,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const observedAt = Number(payload?.observedAt);
     const positionSampledAt = Number(payload?.positionSampledAt);
     const alignmentSource = escapeHtml(String(payload?.alignmentSource || '').trim() || '');
+    const renderMode = escapeHtml(String(payload?.renderMode || '').trim() || '');
     const observedText = Number.isFinite(observedAt) ? new Date(observedAt).toLocaleString() : '-';
     const sampledText = Number.isFinite(positionSampledAt) ? new Date(positionSampledAt).toLocaleString() : '-';
     const lines = [
@@ -956,6 +943,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
       lines.push(`align: ${alignmentSource}`);
     }
     lines.push(`sampledAt: ${escapeHtml(sampledText)}`);
+    if (renderMode) {
+      lines.push(`renderMode: ${renderMode}`);
+    }
     return lines.join('<br />');
   }
 
@@ -1545,7 +1535,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
       }
-      removeBattleChunkCoreMarker(chunkId);
       return;
     }
 
@@ -1555,59 +1544,36 @@ export function createMapProjection(deps: MapProjectionDeps) {
       return;
     }
 
-    const color = normalizeColor(payload.colorRaw, '#ffffff');
-    const fillOpacity = getBattleChunkFillOpacity();
-    const showOutline = shouldShowBattleChunkOutline();
-    const style = {
-      color,
-      weight: showOutline ? 0.8 : 0,
-      opacity: showOutline ? Math.max(0.35, Math.min(1, fillOpacity + 0.35)) : 0,
-      fillColor: color,
-      fillOpacity,
-      interactive: shouldShowBattleChunkDebug(),
-      bubblingMouseEvents: false,
-    };
+    const { style, renderMode } = buildBattleChunkStyle(payload);
     const bounds = buildBattleChunkBounds(map, Math.floor(chunkX), Math.floor(chunkZ));
     const existing = battleChunkLayersById.get(chunkId);
-    const normalizedSymbol = String(payload.symbol || '').trim();
-    const markerType = String(payload.markerType || '').trim();
+    const payloadWithRenderMode = { ...payload, renderMode };
 
     if (existing) {
       try {
         existing.setBounds(bounds);
         existing.setStyle(style);
         if (shouldShowBattleChunkDebug()) {
-          const tooltipHtml = buildBattleChunkTooltip(chunkId, payload);
+          const tooltipHtml = buildBattleChunkTooltip(chunkId, payloadWithRenderMode);
           if (typeof existing.bindTooltip === 'function') {
             existing.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
           }
         } else if (typeof existing.unbindTooltip === 'function') {
           existing.unbindTooltip();
         }
-        if (markerType === 'war_core' && shouldShowBattleChunkCoreMarker()) {
-          upsertBattleChunkCoreMarker(map, chunkId, Math.floor(chunkX), Math.floor(chunkZ), color, normalizedSymbol || '✦');
-        } else {
-          removeBattleChunkCoreMarker(chunkId);
-        }
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
-        removeBattleChunkCoreMarker(chunkId);
       }
     }
 
     const layer = leafletRef.rectangle(bounds, style);
     if (shouldShowBattleChunkDebug() && typeof layer.bindTooltip === 'function') {
-      layer.bindTooltip(buildBattleChunkTooltip(chunkId, payload), { sticky: true, direction: 'top', opacity: 0.95 });
+      layer.bindTooltip(buildBattleChunkTooltip(chunkId, payloadWithRenderMode), { sticky: true, direction: 'top', opacity: 0.95 });
     }
     layer.addTo(map);
     battleChunkLayersById.set(chunkId, layer);
-    if (markerType === 'war_core' && shouldShowBattleChunkCoreMarker()) {
-      upsertBattleChunkCoreMarker(map, chunkId, Math.floor(chunkX), Math.floor(chunkZ), color, normalizedSymbol || '✦');
-    } else {
-      removeBattleChunkCoreMarker(chunkId);
-    }
   }
 
   function removeMissingMarkers(nextIds: Set<string>) {
@@ -1632,12 +1598,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(chunkId)) continue;
       try { layer.remove(); } catch (_) {}
       battleChunkLayersById.delete(chunkId);
-      removeBattleChunkCoreMarker(chunkId);
-    }
-
-    for (const chunkId of Array.from(battleChunkCoreMarkersById.keys())) {
-      if (nextIds.has(chunkId)) continue;
-      removeBattleChunkCoreMarker(chunkId);
     }
   }
 
@@ -2020,11 +1980,6 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { layer.remove(); } catch (_) {}
     }
     battleChunkLayersById.clear();
-
-    for (const marker of battleChunkCoreMarkersById.values()) {
-      try { marker.remove(); } catch (_) {}
-    }
-    battleChunkCoreMarkersById.clear();
 
     for (const layer of reporterEffectLayersByStyle.values()) {
       try { layer.remove(); } catch (_) {}

@@ -80,7 +80,8 @@ type OverlayUiState = {
     REPORTER_CHUNK_RADIUS: string;
     REPORTER_CHUNK_OPACITY: string;
     BATTLE_CHUNK_FILL_OPACITY: string;
-    BATTLE_CHUNK_SHOW_CORE_MARKER: boolean;
+    BATTLE_CHUNK_HIGHLIGHT_CORE: boolean;
+    BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR: string;
     BATTLE_CHUNK_SHOW_OUTLINE: boolean;
     BATTLE_CHUNK_DEBUG: boolean;
     AUTO_TEAM_FROM_NAME: boolean;
@@ -534,7 +535,14 @@ function applyQuickLabel(label: string) {
         <label>色块透明度（0.02 ~ 0.95）</label>
         <input v-model="state.form.BATTLE_CHUNK_FILL_OPACITY" @input="markDisplayInputsDirty" id="nodemc-overlay-battle-chunk-opacity" type="number" min="0.02" max="0.95" step="0.01" />
       </div>
-      <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_SHOW_CORE_MARKER" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-core-marker" type="checkbox" />显示核心区块标志</label>
+      <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_HIGHLIGHT_CORE" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-core-highlight" type="checkbox" />高亮核心区块描边</label>
+      <div class="n-row">
+        <label>核心描边颜色(#RRGGBB)</label>
+        <div class="n-color-input-wrap">
+          <span class="n-color-swatch" :style="{ background: state.form.BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR || '#FF4DFF' }"></span>
+          <input v-model="state.form.BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR" @input="markDisplayInputsDirty" id="nodemc-overlay-battle-chunk-core-highlight-color" type="text" placeholder="#FF4DFF" />
+        </div>
+      </div>
       <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_SHOW_OUTLINE" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-outline" type="checkbox" />显示区块描边</label>
       <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_DEBUG" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-debug" type="checkbox" />显示战局区块调试信息</label>
     </div>
