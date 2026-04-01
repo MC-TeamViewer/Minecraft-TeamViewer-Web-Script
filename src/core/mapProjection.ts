@@ -846,6 +846,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return Math.max(0.02, Math.min(0.95, opacity));
   }
 
+  function shouldShowBattleChunkZone() {
+    return Boolean(CONFIG.BATTLE_CHUNK_SHOW_ZONE);
+  }
+
   function shouldHighlightBattleChunkCore() {
     return Boolean(CONFIG.BATTLE_CHUNK_HIGHLIGHT_CORE);
   }
@@ -874,10 +878,15 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const fillOpacity = getBattleChunkFillOpacity();
     const showOutline = shouldShowBattleChunkOutline();
     const markerType = String(payload?.markerType || '').trim();
-    const renderMode = markerType === 'war_core' && shouldHighlightBattleChunkCore()
+    const isCoreChunk = markerType === 'war_core';
+    const renderMode = isCoreChunk && shouldHighlightBattleChunkCore()
       ? 'core_outline'
       : 'normal_chunk';
     const coreOutlineColor = normalizeColor(CONFIG.BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR, '#FF4DFF');
+
+    if (!shouldShowBattleChunkZone() && renderMode !== 'core_outline') {
+      return null;
+    }
 
     if (renderMode === 'core_outline') {
       return {
@@ -1544,7 +1553,17 @@ export function createMapProjection(deps: MapProjectionDeps) {
       return;
     }
 
-    const { style, renderMode } = buildBattleChunkStyle(payload);
+    const battleChunkStyle = buildBattleChunkStyle(payload);
+    if (!battleChunkStyle) {
+      const existing = battleChunkLayersById.get(chunkId);
+      if (existing) {
+        try { existing.remove(); } catch (_) {}
+        battleChunkLayersById.delete(chunkId);
+      }
+      return;
+    }
+
+    const { style, renderMode } = battleChunkStyle;
     const bounds = buildBattleChunkBounds(map, Math.floor(chunkX), Math.floor(chunkZ));
     const existing = battleChunkLayersById.get(chunkId);
     const payloadWithRenderMode = { ...payload, renderMode };

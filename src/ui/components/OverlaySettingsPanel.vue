@@ -80,6 +80,7 @@ type OverlayUiState = {
     REPORTER_CHUNK_RADIUS: string;
     REPORTER_CHUNK_OPACITY: string;
     BATTLE_CHUNK_FILL_OPACITY: string;
+    BATTLE_CHUNK_SHOW_ZONE: boolean;
     BATTLE_CHUNK_HIGHLIGHT_CORE: boolean;
     BATTLE_CHUNK_CORE_HIGHLIGHT_COLOR: string;
     BATTLE_CHUNK_SHOW_OUTLINE: boolean;
@@ -535,6 +536,7 @@ function applyQuickLabel(label: string) {
         <label>色块透明度（0.02 ~ 0.95）</label>
         <input v-model="state.form.BATTLE_CHUNK_FILL_OPACITY" @input="markDisplayInputsDirty" id="nodemc-overlay-battle-chunk-opacity" type="number" min="0.02" max="0.95" step="0.01" />
       </div>
+      <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_SHOW_ZONE" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-zone" type="checkbox" />显示战区区块</label>
       <label class="n-check"><input v-model="state.form.BATTLE_CHUNK_HIGHLIGHT_CORE" @change="triggerAutoApply" id="nodemc-overlay-battle-chunk-core-highlight" type="checkbox" />高亮核心区块描边</label>
       <div class="n-row">
         <label>核心描边颜色(#RRGGBB)</label>
