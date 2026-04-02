@@ -28,6 +28,8 @@ type OverviewState = {
   mapPlayerCount: number;
   roomCode: string;
   targetDimension: string;
+  clientProtocolVersion: string;
+  serverProtocolVersion: string;
 };
 
 type OverlayUiState = {
@@ -133,7 +135,7 @@ const hasPlayers = computed(() => props.state.players.length > 0);
 const hasMapPlayers = computed(() => props.state.mapPlayers.length > 0);
 const configMenuVisible = ref(false);
 
-const statusToneClass = computed(() => {
+const serverProtocolToneClass = computed(() => {
   if (props.state.overview.hasError) return 'is-error';
   if (props.state.overview.wsConnected) return 'is-ok';
   return 'is-idle';
@@ -249,9 +251,12 @@ function applyQuickLabel(label: string) {
       <div class="n-overview-copy">
         <div class="n-hero-title">{{ statusTitle }}</div>
       </div>
-      <div class="n-status-pill" :class="statusToneClass">{{ state.overview.wsConnected ? 'WS 已连接' : 'WS 未连接' }}</div>
+      <div class="n-status-group">
+        <div class="n-inline-pill">本地版本 {{ state.overview.clientProtocolVersion || '-' }}</div>
+        <div class="n-status-pill" :class="serverProtocolToneClass">服务器版本 {{ state.overview.serverProtocolVersion || '-' }}</div>
+      </div>
     </div>
-    <div class="n-hero-text">{{ state.statusText }}</div>
+    <div v-if="state.statusText" class="n-hero-text">{{ state.statusText }}</div>
   </div>
 
   <div class="n-primary-tabs">

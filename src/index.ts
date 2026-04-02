@@ -2,6 +2,7 @@
 import {
   DEFAULT_CONFIG,
   STORAGE_KEY,
+  ADMIN_NETWORK_PROTOCOL_VERSION,
 } from './constants';
 import {
   buildExportFileName,
@@ -54,6 +55,7 @@ declare const unsafeWindow: Window | undefined;
   let lastAdminMessageType: string | null = null;
   let lastAdminMessageAt = 0;
   let versionIncompatibilityAlerted = false;
+  let serverProtocolVersion: string | null = null;
 
   let wsClient: ReturnType<typeof createAdminWsClient> | null = null;
 
@@ -501,11 +503,8 @@ declare const unsafeWindow: Window | undefined;
 
   function updateUiStatus() {
     const mapCounts = mapProjection.getCounts();
-    const lastErr = lastErrorText ? `错误: ${lastErrorText}` : '正常';
-    const wsText = wsConnected ? '已连接' : '未连接';
-    const annotations = mapCounts.markers + mapCounts.waypoints + mapCounts.battleChunks;
-    const serverFilterText = sameServerFilterEnabled ? '同服过滤:开' : '同服过滤:关';
-    settingsUi.updateStatus(`状态: ${lastErr} | WS: ${wsText} | 标注: ${annotations} | ${serverFilterText}`,
+    const annotations = mapCounts.markers + mapCounts.waypoints;
+    settingsUi.updateStatus(lastErrorText ? `错误: ${lastErrorText}` : '',
       {
         wsConnected,
         hasError: Boolean(lastErrorText),
@@ -513,6 +512,8 @@ declare const unsafeWindow: Window | undefined;
         battleChunkCount: mapCounts.battleChunks,
         roomCode: CONFIG.ROOM_CODE,
         targetDimension: CONFIG.TARGET_DIMENSION,
+        clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
+        serverProtocolVersion: serverProtocolVersion || '-',
       });
   }
 
@@ -840,9 +841,13 @@ declare const unsafeWindow: Window | undefined;
         lastErrorText = status.lastErrorText;
         lastAdminMessageType = status.lastAdminMessageType;
         lastAdminMessageAt = status.lastAdminMessageAt;
+        serverProtocolVersion = status.serverProtocolVersion;
         updateUiStatus();
       },
       onVersionIncompatible: (payload) => {
+        if (payload.serverProtocolVersion) {
+          serverProtocolVersion = payload.serverProtocolVersion;
+        }
         updateUiStatus();
         if (versionIncompatibilityAlerted) return;
         versionIncompatibilityAlerted = true;

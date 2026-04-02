@@ -97,6 +97,12 @@ export const UI_STYLE_TEXT = `
     gap: 10px;
     align-items: flex-start;
   }
+  #nodemc-overlay-panel .n-status-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   #nodemc-overlay-panel .n-primary-tabs {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
@@ -294,6 +300,11 @@ export const UI_STYLE_TEXT = `
     font-weight: 700;
     border: 1px solid transparent;
     white-space: nowrap;
+  }
+  #nodemc-overlay-panel .n-inline-pill {
+    color: #1e3a8a;
+    background: rgba(219, 234, 254, 0.95);
+    border-color: rgba(59, 130, 246, 0.3);
   }
   #nodemc-overlay-panel .n-status-pill.is-ok {
     color: #166534;

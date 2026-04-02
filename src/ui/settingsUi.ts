@@ -160,6 +160,8 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       mapPlayerCount: 0,
       roomCode: 'default',
       targetDimension: 'minecraft:overworld',
+      clientProtocolVersion: '-',
+      serverProtocolVersion: '-',
     },
     dirty: {
       mainText: false,
@@ -449,6 +451,8 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       mapPlayerCount: number;
       roomCode: string;
       targetDimension: string;
+      clientProtocolVersion: string;
+      serverProtocolVersion: string;
     }>,
   ) {
     state.statusText = text;

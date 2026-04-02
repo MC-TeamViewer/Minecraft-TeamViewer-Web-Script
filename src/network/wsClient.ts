@@ -25,6 +25,7 @@ type WsClientDeps = {
     lastErrorText: string | null;
     lastAdminMessageType: string | null;
     lastAdminMessageAt: number;
+    serverProtocolVersion: string | null;
   }) => void;
   onVersionIncompatible?: (payload: {
     message: string;
@@ -50,6 +51,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
   let lastAdminResyncRequestAt = 0;
   let lastAdminMessageType: string | null = null;
   let lastAdminMessageAt = 0;
+  let serverProtocolVersion: string | null = null;
   let latestSnapshot: Snapshot = createEmptyAdminSnapshot();
 
   function emitStatus() {
@@ -58,6 +60,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
       lastErrorText,
       lastAdminMessageType,
       lastAdminMessageAt,
+      serverProtocolVersion,
     });
   }
 
@@ -227,6 +230,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     manualWsClose = false;
     reconnectSuppressedByVersionIncompatibility = false;
     lastErrorText = null;
+    serverProtocolVersion = null;
     connect();
     emitStatus();
   }
@@ -288,6 +292,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     }
 
     reconnectSuppressedByVersionIncompatibility = false;
+    serverProtocolVersion = null;
 
     const config = deps.getConfig();
 
@@ -354,20 +359,22 @@ export function createAdminWsClient(deps: WsClientDeps) {
 
         if (payload?.type === 'handshake_ack') {
           const handshakePayload = payload as Record<string, unknown>;
+          serverProtocolVersion = String(handshakePayload.networkProtocolVersion ?? '').trim() || null;
           if (handshakePayload.ready === false) {
             const reason = formatHandshakeRejectReason(handshakePayload);
             forceCloseForIncompatibleVersion(`服务端拒绝握手: ${reason}`, {
+              serverProtocolVersion: serverProtocolVersion || undefined,
               rejectReason: reason,
             });
             return;
           }
 
-          const serverProtocolVersion = String(handshakePayload.networkProtocolVersion ?? '0.0.0').trim() || '0.0.0';
-          if (!protocolAtLeast(serverProtocolVersion, ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION)) {
+          const negotiatedServerProtocolVersion = serverProtocolVersion || '0.0.0';
+          if (!protocolAtLeast(negotiatedServerProtocolVersion, ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION)) {
             forceCloseForIncompatibleVersion(
-              `版本不兼容: 服务端协议 ${serverProtocolVersion} 低于脚本最低要求 ${ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION}`,
+              `版本不兼容: 服务端协议 ${negotiatedServerProtocolVersion} 低于脚本最低要求 ${ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION}`,
               {
-                serverProtocolVersion,
+                serverProtocolVersion: negotiatedServerProtocolVersion,
                 minimumCompatibleVersion: ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
               },
             );
@@ -423,6 +430,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
       lastErrorText,
       lastAdminMessageType,
       lastAdminMessageAt,
+      serverProtocolVersion,
       wsReadyState: adminWs ? adminWs.readyState : -1,
     };
   }
