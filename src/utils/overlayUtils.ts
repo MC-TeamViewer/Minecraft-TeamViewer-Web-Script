@@ -24,7 +24,7 @@ export function normalizeWsUrl(rawUrl: unknown) {
   if (!text) return DEFAULT_CONFIG.ADMIN_WS_URL;
 
   let next = text;
-  if (next.endsWith('/snapshot')) next = next.slice(0, -('/snapshot'.length)) + '/adminws';
+  if (next.endsWith('/snapshot')) next = next.slice(0, -('/snapshot'.length)) + '/web-map/ws';
 
   try {
     const parsed = new URL(next);

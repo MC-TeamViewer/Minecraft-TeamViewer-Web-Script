@@ -162,7 +162,7 @@ export const UI_STYLE_TEXT = `
     margin: 0;
   }
 
-  /* allow explicit full-width rows (e.g. Admin WS URL) */
+  /* allow explicit full-width rows (e.g. Web Map WS URL) */
   #nodemc-overlay-panel .n-row.full-width {
     grid-column: 1 / -1;
   }

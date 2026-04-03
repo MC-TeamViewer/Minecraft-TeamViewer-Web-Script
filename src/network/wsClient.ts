@@ -1,4 +1,4 @@
-import type { AdminInboundPacket, AdminOutboundPacket, TabStatePatch } from './networkSchemas';
+import type { WebMapInboundPacket, WebMapOutboundPacket, TabStatePatch } from './networkSchemas';
 import {
   ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
 } from '../constants';
@@ -7,14 +7,14 @@ import {
   shouldResyncForScopeMissingBaseline,
 } from '../utils/overlayUtils';
 import {
-  AdminSnapshot,
-  buildAdminHandshake,
-  buildAdminResyncRequest,
-  createEmptyAdminSnapshotModel,
+  WebMapSnapshot,
+  buildWebMapHandshake,
+  buildWebMapResyncRequest,
+  createEmptyWebMapSnapshotModel,
 } from './networkSchemas';
 import { ProtobufNetworkMessageCodec } from './messageCodec';
 
-type Snapshot = AdminSnapshot & Record<string, any>;
+type Snapshot = WebMapSnapshot & Record<string, any>;
 
 type ScopeDebugCounts = {
   players: number;
@@ -29,7 +29,7 @@ type ScopeDebugCounts = {
 type WsDebugMessageRecord = {
   receivedAt: number;
   type: string;
-  channel: 'admin';
+  channel: 'web_map';
   counts: ScopeDebugCounts;
   payload: Record<string, unknown> | null;
 };
@@ -40,7 +40,7 @@ type WsDebugState = {
   lastHandshakeAck: WsDebugMessageRecord | null;
   lastSnapshotFull: WsDebugMessageRecord | null;
   lastPatch: WsDebugMessageRecord | null;
-  lastAdminAck: WsDebugMessageRecord | null;
+  lastWebMapAck: WsDebugMessageRecord | null;
   lastResyncRequest: {
     requestedAt: number;
     reason: string;
@@ -58,8 +58,8 @@ type WsClientDeps = {
   onWsStatusChanged: (payload: {
     wsConnected: boolean;
     lastErrorText: string | null;
-    lastAdminMessageType: string | null;
-    lastAdminMessageAt: number;
+    lastWebMapMessageType: string | null;
+    lastWebMapMessageAt: number;
     serverProtocolVersion: string | null;
   }) => void;
   onVersionIncompatible?: (payload: {
@@ -70,31 +70,31 @@ type WsClientDeps = {
   }) => void;
 };
 
-export function createEmptyAdminSnapshot() {
-  return createEmptyAdminSnapshotModel();
+export function createEmptyWebMapSnapshot() {
+  return createEmptyWebMapSnapshotModel();
 }
 
-export function createAdminWsClient(deps: WsClientDeps) {
+export function createWebMapWsClient(deps: WsClientDeps) {
   const messageCodec = new ProtobufNetworkMessageCodec();
-  let adminWs: WebSocket | null = null;
+  let webMapWs: WebSocket | null = null;
   let wsConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let manualWsClose = false;
   let reconnectSuppressedByVersionIncompatibility = false;
 
   let lastErrorText: string | null = null;
-  let lastAdminResyncRequestAt = 0;
-  let lastAdminMessageType: string | null = null;
-  let lastAdminMessageAt = 0;
+  let lastWebMapResyncRequestAt = 0;
+  let lastWebMapMessageType: string | null = null;
+  let lastWebMapMessageAt = 0;
   let serverProtocolVersion: string | null = null;
-  let latestSnapshot: Snapshot = createEmptyAdminSnapshot();
+  let latestSnapshot: Snapshot = createEmptyWebMapSnapshot();
   let debugState: WsDebugState = {
     history: [],
     lastInbound: null,
     lastHandshakeAck: null,
     lastSnapshotFull: null,
     lastPatch: null,
-    lastAdminAck: null,
+    lastWebMapAck: null,
     lastResyncRequest: null,
   };
 
@@ -139,7 +139,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     }
   }
 
-  function recordInboundMessage(payload: AdminInboundPacket) {
+  function recordInboundMessage(payload: WebMapInboundPacket) {
     if (!isDebugEnabled()) {
       return;
     }
@@ -149,7 +149,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     const record: WsDebugMessageRecord = {
       receivedAt: Date.now(),
       type: payload?.type ? String(payload.type) : 'unknown',
-      channel: 'admin',
+      channel: 'web_map',
       counts: getCountsFromPayload(payloadRecord),
       payload: payloadRecord,
     };
@@ -161,7 +161,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
       lastHandshakeAck: record.type === 'handshake_ack' ? record : debugState.lastHandshakeAck,
       lastSnapshotFull: record.type === 'snapshot_full' ? record : debugState.lastSnapshotFull,
       lastPatch: record.type === 'patch' ? record : debugState.lastPatch,
-      lastAdminAck: record.type === 'admin_ack' ? record : debugState.lastAdminAck,
+      lastWebMapAck: record.type === 'admin_ack' ? record : debugState.lastWebMapAck,
     };
   }
 
@@ -169,8 +169,8 @@ export function createAdminWsClient(deps: WsClientDeps) {
     deps.onWsStatusChanged({
       wsConnected,
       lastErrorText,
-      lastAdminMessageType,
-      lastAdminMessageAt,
+      lastWebMapMessageType,
+      lastWebMapMessageAt,
       serverProtocolVersion,
     });
   }
@@ -187,7 +187,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
 
   function requestResync(reason = 'baseline_missing') {
     const textReason = String(reason || 'baseline_missing').trim() || 'baseline_missing';
-    if (!adminWs || adminWs.readyState !== WebSocket.OPEN) {
+    if (!webMapWs || webMapWs.readyState !== WebSocket.OPEN) {
       if (isDebugEnabled()) {
         debugState = {
           ...debugState,
@@ -201,10 +201,10 @@ export function createAdminWsClient(deps: WsClientDeps) {
       return false;
     }
     const now = Date.now();
-    if (now - lastAdminResyncRequestAt < 1500) {
+    if (now - lastWebMapResyncRequestAt < 1500) {
       return false;
     }
-    lastAdminResyncRequestAt = now;
+    lastWebMapResyncRequestAt = now;
     if (isDebugEnabled()) {
       debugState = {
         ...debugState,
@@ -216,14 +216,14 @@ export function createAdminWsClient(deps: WsClientDeps) {
       };
     }
     try {
-      adminWs.send(messageCodec.encode(buildAdminResyncRequest(textReason)));
+      webMapWs.send(messageCodec.encode(buildWebMapResyncRequest(textReason)));
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  function applyAdminDeltaMessage(message: AdminInboundPacket) {
+  function applyWebMapDeltaMessage(message: WebMapInboundPacket) {
     if (!message || typeof message !== 'object') {
       return;
     }
@@ -325,14 +325,14 @@ export function createAdminWsClient(deps: WsClientDeps) {
     };
   }
 
-  function sendCommand(message: AdminOutboundPacket) {
-    if (!adminWs || adminWs.readyState !== WebSocket.OPEN) {
+  function sendCommand(message: WebMapOutboundPacket) {
+    if (!webMapWs || webMapWs.readyState !== WebSocket.OPEN) {
       lastErrorText = 'ws not connected';
       emitStatus();
       return false;
     }
     try {
-      adminWs.send(messageCodec.encode(message));
+      webMapWs.send(messageCodec.encode(message));
       return true;
     } catch (error: any) {
       lastErrorText = String(error?.message || error);
@@ -342,15 +342,15 @@ export function createAdminWsClient(deps: WsClientDeps) {
   }
 
   function cleanup() {
-    if (adminWs) {
-      adminWs.onopen = null;
-      adminWs.onmessage = null;
-      adminWs.onerror = null;
-      adminWs.onclose = null;
+    if (webMapWs) {
+      webMapWs.onopen = null;
+      webMapWs.onmessage = null;
+      webMapWs.onerror = null;
+      webMapWs.onclose = null;
       try {
-        adminWs.close();
+        webMapWs.close();
       } catch (_) {}
-      adminWs = null;
+      webMapWs = null;
     }
     wsConnected = false;
     if (reconnectTimer !== null) {
@@ -411,18 +411,18 @@ export function createAdminWsClient(deps: WsClientDeps) {
         rejectReason: details?.rejectReason,
       });
     } catch (_) {}
-    if (adminWs) {
+    if (webMapWs) {
       try {
-        adminWs.close(1008, message.slice(0, 120));
+        webMapWs.close(1008, message.slice(0, 120));
       } catch (_) {
-        try { adminWs.close(); } catch (_) {}
+        try { webMapWs.close(); } catch (_) {}
       }
     }
     emitStatus();
   }
 
   function connect() {
-    if (adminWs && (adminWs.readyState === WebSocket.OPEN || adminWs.readyState === WebSocket.CONNECTING)) {
+    if (webMapWs && (webMapWs.readyState === WebSocket.OPEN || webMapWs.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
@@ -442,13 +442,13 @@ export function createAdminWsClient(deps: WsClientDeps) {
       return;
     }
 
-    adminWs = ws;
+    webMapWs = ws;
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       wsConnected = true;
       lastErrorText = null;
       try {
-        ws.send(messageCodec.encode(buildAdminHandshake(config.ROOM_CODE)));
+        ws.send(messageCodec.encode(buildWebMapHandshake(config.ROOM_CODE)));
       } catch (error: any) {
         lastErrorText = String(error?.message || error);
       }
@@ -473,8 +473,8 @@ export function createAdminWsClient(deps: WsClientDeps) {
           return;
         }
         recordInboundMessage(payload);
-        lastAdminMessageType = payload?.type ? String(payload.type) : 'unknown';
-        lastAdminMessageAt = Date.now();
+        lastWebMapMessageType = payload?.type ? String(payload.type) : 'unknown';
+        lastWebMapMessageAt = Date.now();
 
         if (payload?.type === 'admin_ack') {
           if (payload.ok) {
@@ -522,7 +522,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
           return;
         }
 
-        applyAdminDeltaMessage(payload);
+        applyWebMapDeltaMessage(payload);
         lastErrorText = null;
         emitStatus();
       } catch (error: any) {
@@ -541,7 +541,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
 
     ws.onclose = (event) => {
       wsConnected = false;
-      adminWs = null;
+      webMapWs = null;
       if (!manualWsClose && !reconnectSuppressedByVersionIncompatibility) {
         scheduleReconnect();
       } else if (reconnectSuppressedByVersionIncompatibility && !lastErrorText) {
@@ -553,7 +553,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
   }
 
   function isWsOpen() {
-    return !!adminWs && adminWs.readyState === WebSocket.OPEN;
+    return !!webMapWs && webMapWs.readyState === WebSocket.OPEN;
   }
 
   function getSnapshot() {
@@ -564,10 +564,10 @@ export function createAdminWsClient(deps: WsClientDeps) {
     return {
       wsConnected,
       lastErrorText,
-      lastAdminMessageType,
-      lastAdminMessageAt,
+      lastWebMapMessageType,
+      lastWebMapMessageAt,
       serverProtocolVersion,
-      wsReadyState: adminWs ? adminWs.readyState : -1,
+      wsReadyState: webMapWs ? webMapWs.readyState : -1,
     };
   }
 
@@ -579,7 +579,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
         lastHandshakeAck: null,
         lastSnapshotFull: null,
         lastPatch: null,
-        lastAdminAck: null,
+        lastWebMapAck: null,
         lastResyncRequest: null,
       };
     }
@@ -593,7 +593,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
       lastHandshakeAck: null,
       lastSnapshotFull: null,
       lastPatch: null,
-      lastAdminAck: null,
+      lastWebMapAck: null,
       lastResyncRequest: null,
     };
   }

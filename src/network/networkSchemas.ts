@@ -158,7 +158,7 @@ export type BattleChunkNode = {
   data?: BattleChunkData;
 } | BattleChunkData;
 
-export type AdminSnapshot = {
+export type WebMapSnapshot = {
   players: Record<string, PlayerNode>;
   entities: Record<string, EntityNode>;
   waypoints: Record<string, WaypointNode>;
@@ -170,16 +170,15 @@ export type AdminSnapshot = {
   server_time: number | null;
 };
 
-export type AdminHandshakePacket = {
+export type WebMapHandshakePacket = {
   type: 'handshake';
   networkProtocolVersion: string;
   minimumCompatibleNetworkProtocolVersion: string;
   localProgramVersion: string;
   roomCode: string;
-  channel: 'admin';
 };
 
-export type AdminResyncRequestPacket = {
+export type WebMapResyncRequestPacket = {
   type: 'resync_req';
   reason?: string;
 };
@@ -225,9 +224,9 @@ export type WaypointsDeletePacket = {
   waypointIds: string[];
 };
 
-export type AdminOutboundPacket =
-  | AdminHandshakePacket
-  | AdminResyncRequestPacket
+export type WebMapOutboundPacket =
+  | WebMapHandshakePacket
+  | WebMapResyncRequestPacket
   | CommandPlayerMarkSetPacket
   | CommandPlayerMarkClearPacket
   | CommandPlayerMarkClearAllPacket
@@ -235,7 +234,7 @@ export type AdminOutboundPacket =
   | CommandTacticalWaypointSetPacket
   | WaypointsDeletePacket;
 
-export type AdminAckInboundPacket = {
+export type WebMapAckInboundPacket = {
   type: 'admin_ack';
   ok: boolean;
   error?: string;
@@ -298,14 +297,14 @@ export type PatchInboundPacket = {
   [key: string]: unknown;
 };
 
-export type AdminInboundPacket =
-  | AdminAckInboundPacket
+export type WebMapInboundPacket =
+  | WebMapAckInboundPacket
   | HandshakeAckInboundPacket
   | PongInboundPacket
   | SnapshotFullInboundPacket
   | PatchInboundPacket;
 
-export function createEmptyAdminSnapshotModel(): AdminSnapshot {
+export function createEmptyWebMapSnapshotModel(): WebMapSnapshot {
   return {
     players: {},
     entities: {},
@@ -319,14 +318,13 @@ export function createEmptyAdminSnapshotModel(): AdminSnapshot {
   };
 }
 
-export function buildAdminHandshake(roomCode: string): AdminHandshakePacket {
+export function buildWebMapHandshake(roomCode: string): WebMapHandshakePacket {
   return {
     type: 'handshake',
     networkProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
     minimumCompatibleNetworkProtocolVersion: ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
     localProgramVersion: LOCAL_PROGRAM_VERSION,
     roomCode: normalizeRoomCode(roomCode),
-    channel: 'admin',
   };
 }
 
@@ -397,14 +395,14 @@ export function buildCommandTacticalWaypointDelete(waypointId: string): Waypoint
   };
 }
 
-export function buildAdminResyncRequest(reason = 'baseline_missing'): AdminResyncRequestPacket {
+export function buildWebMapResyncRequest(reason = 'baseline_missing'): WebMapResyncRequestPacket {
   return {
     type: 'resync_req',
     reason,
   };
 }
 
-export function parseAdminInboundPacket(payload: unknown): AdminInboundPacket | null {
+export function parseWebMapInboundPacket(payload: unknown): WebMapInboundPacket | null {
   if (!payload || typeof payload !== 'object') {
     return null;
   }
@@ -421,7 +419,7 @@ export function parseAdminInboundPacket(payload: unknown): AdminInboundPacket | 
     case 'pong':
     case 'snapshot_full':
     case 'patch':
-      return message as AdminInboundPacket;
+      return message as WebMapInboundPacket;
     default:
       return null;
   }

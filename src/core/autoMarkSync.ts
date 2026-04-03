@@ -17,7 +17,7 @@ type Candidate = {
 
 export function createAutoMarkSyncManager(deps: {
   isWsOpen: () => boolean;
-  sendAdminCommand: (message: Record<string, unknown>) => boolean;
+  sendWebMapCommand: (message: Record<string, unknown>) => boolean;
   getConfiguredTeamColor: (team: string) => string;
 }) {
   let lastAutoMarkSyncAt = 0;
@@ -55,7 +55,7 @@ export function createAutoMarkSyncManager(deps: {
           continue;
         }
 
-        ok = deps.sendAdminCommand(buildCommandPlayerMarkSet({
+        ok = deps.sendWebMapCommand(buildCommandPlayerMarkSet({
           playerId,
           team,
           color,
@@ -66,7 +66,7 @@ export function createAutoMarkSyncManager(deps: {
           continue;
         }
 
-        ok = deps.sendAdminCommand(buildCommandPlayerMarkClear(playerId));
+        ok = deps.sendWebMapCommand(buildCommandPlayerMarkClear(playerId));
       }
 
       if (!ok) {

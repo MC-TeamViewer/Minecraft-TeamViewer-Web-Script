@@ -733,7 +733,7 @@ function formatDimensionBucket(item: {
     </div>
     <div class="n-card">
       <div class="n-row full-width">
-        <label>Admin WS URL</label>
+        <label>Web Map WS URL</label>
         <input v-model="state.form.ADMIN_WS_URL" @input="markConnectionDirty" id="nodemc-overlay-url" type="text" />
       </div>
       <div class="n-row">
@@ -973,7 +973,7 @@ function formatDimensionBucket(item: {
       <div class="n-help-content full-width">
         <ol class="n-help-list">
           <li>先看概览页状态。如果显示“待连接”或“需要处理”，优先进入“连接设置”。</li>
-          <li>在连接设置里填写 <b>Admin WS URL</b>、房间号和默认查看维度，保存后会自动重连。</li>
+          <li>在连接设置里填写 <b>Web Map WS URL</b>、房间号和默认查看维度，保存后会自动重连。</li>
           <li>需要给玩家分类或贴标签时，统一进入“标记”页处理，不在概览页重复操作。</li>
           <li>需要调整地图展示效果时，进入“显示”页统一修改尺寸、颜色和特殊显示。</li>
           <li>想快速看地图目标时，直接打开“地图玩家列表”，列表里点击玩家即可聚焦地图。</li>

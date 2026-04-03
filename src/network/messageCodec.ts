@@ -1,6 +1,6 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
-import type { AdminInboundPacket, AdminOutboundPacket } from './networkSchemas';
-import { parseAdminInboundPacket } from './networkSchemas';
+import type { WebMapInboundPacket, WebMapOutboundPacket } from './networkSchemas';
+import { parseWebMapInboundPacket } from './networkSchemas';
 import {
   AdminAckSchema,
   CommandPlayerMarkClearAllSchema,
@@ -37,7 +37,7 @@ function toScopePatch(scope: { upsert: Array<{ id: string; data?: Record<string,
   return { upsert, delete: deleteIds };
 }
 
-function decodeAdminAck(message: any): AdminInboundPacket | null {
+function decodeWebMapAck(message: any): WebMapInboundPacket | null {
   const payload: Record<string, unknown> = {
     type: 'admin_ack',
     ok: Boolean(message.ok),
@@ -61,11 +61,11 @@ function decodeAdminAck(message: any): AdminInboundPacket | null {
     payload.waypointIds = Array.isArray(detail.value?.waypointIds) ? detail.value.waypointIds : [];
   }
 
-  return parseAdminInboundPacket(payload);
+  return parseWebMapInboundPacket(payload);
 }
 
-function decodeSnapshotFull(message: any): AdminInboundPacket | null {
-  return parseAdminInboundPacket({
+function decodeSnapshotFull(message: any): WebMapInboundPacket | null {
+  return parseWebMapInboundPacket({
     type: 'snapshot_full',
     players: message.players ?? {},
     entities: message.entities ?? {},
@@ -80,7 +80,7 @@ function decodeSnapshotFull(message: any): AdminInboundPacket | null {
   });
 }
 
-function decodePatch(message: any): AdminInboundPacket | null {
+function decodePatch(message: any): WebMapInboundPacket | null {
   const meta: Record<string, unknown> = {};
 
   if (message.tabStatePatch) {
@@ -98,7 +98,7 @@ function decodePatch(message: any): AdminInboundPacket | null {
     meta.connections_count = message.connectionsCount;
   }
 
-  return parseAdminInboundPacket({
+  return parseWebMapInboundPacket({
     type: 'patch',
     players: toScopePatch(message.players),
     entities: toScopePatch(message.entities),
@@ -111,12 +111,12 @@ function decodePatch(message: any): AdminInboundPacket | null {
 }
 
 export interface NetworkMessageCodec {
-  encode(packet: AdminOutboundPacket): ArrayBuffer;
-  decode(payload: ArrayBuffer | Uint8Array | string): AdminInboundPacket | null;
+  encode(packet: WebMapOutboundPacket): ArrayBuffer;
+  decode(payload: ArrayBuffer | Uint8Array | string): WebMapInboundPacket | null;
 }
 
 export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
-  encode(packet: AdminOutboundPacket): ArrayBuffer {
+  encode(packet: WebMapOutboundPacket): ArrayBuffer {
     switch (packet.type) {
       case 'handshake': {
         const envelope = create(WireEnvelopeSchema, {
@@ -228,11 +228,11 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
         return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
       }
       default:
-        throw new Error(`Unsupported admin outbound packet: ${(packet as { type?: string }).type || 'unknown'}`);
+        throw new Error(`Unsupported web-map outbound packet: ${(packet as { type?: string }).type || 'unknown'}`);
     }
   }
 
-  decode(payload: ArrayBuffer | Uint8Array | string): AdminInboundPacket | null {
+  decode(payload: ArrayBuffer | Uint8Array | string): WebMapInboundPacket | null {
     if (typeof payload === 'string') {
       return null;
     }
@@ -248,9 +248,9 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
 
     switch (envelope.payload.case) {
       case 'adminAck':
-        return decodeAdminAck(envelope.payload.value);
+        return decodeWebMapAck(envelope.payload.value);
       case 'handshakeAck':
-        return parseAdminInboundPacket({
+        return parseWebMapInboundPacket({
           type: 'handshake_ack',
           ready: envelope.payload.value.ready,
           networkProtocolVersion: envelope.payload.value.networkProtocolVersion,
@@ -267,7 +267,7 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
           battleChunkTimeoutSec: envelope.payload.value.battleChunkTimeoutSec,
         });
       case 'pong':
-        return parseAdminInboundPacket({
+        return parseWebMapInboundPacket({
           type: 'pong',
           serverTime: envelope.payload.value.serverTime,
         });

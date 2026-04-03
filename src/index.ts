@@ -34,7 +34,7 @@ import {
   buildCommandTacticalWaypointDelete,
   buildCommandTacticalWaypointSet,
 } from './network/networkSchemas';
-import { createAdminWsClient } from './network/wsClient';
+import { createWebMapWsClient } from './network/wsClient';
 import { createMapProjection } from './core/mapProjection';
 import { createSettingsUi } from './ui/settingsUi';
 
@@ -52,16 +52,16 @@ declare const unsafeWindow: Window | undefined;
   let wsConnected = false;
   let sameServerFilterEnabled = false;
   let overlayStarted = false;
-  let lastAdminMessageType: string | null = null;
-  let lastAdminMessageAt = 0;
+  let lastWebMapMessageType: string | null = null;
+  let lastWebMapMessageAt = 0;
   let versionIncompatibilityAlerted = false;
   let serverProtocolVersion: string | null = null;
 
-  let wsClient: ReturnType<typeof createAdminWsClient> | null = null;
+  let wsClient: ReturnType<typeof createWebMapWsClient> | null = null;
 
   const autoMarkSync = createAutoMarkSyncManager({
     isWsOpen: () => Boolean(wsClient?.isWsOpen()),
-    sendAdminCommand: (message) => wsClient ? wsClient.sendCommand(message) : false,
+    sendWebMapCommand: (message) => wsClient ? wsClient.sendCommand(message) : false,
     getConfiguredTeamColor: (team) => getConfiguredTeamColor(team, CONFIG),
   });
 
@@ -552,7 +552,7 @@ declare const unsafeWindow: Window | undefined;
     getLatestPlayerMarks: () => latestPlayerMarks,
     getWsConnected: () => wsConnected,
     onCreateTacticalWaypoint: (payload) => {
-      const ok = sendAdminCommand(buildCommandTacticalWaypointSet({
+      const ok = sendWebMapCommand(buildCommandTacticalWaypointSet({
         x: payload.x,
         z: payload.z,
         label: payload.label,
@@ -570,7 +570,7 @@ declare const unsafeWindow: Window | undefined;
       return ok;
     },
     onDeleteTacticalWaypoint: ({ waypointId }) => {
-      const ok = sendAdminCommand(buildCommandTacticalWaypointDelete(waypointId));
+      const ok = sendWebMapCommand(buildCommandTacticalWaypointDelete(waypointId));
       if (ok) {
         lastErrorText = null;
         updateUiStatus();
@@ -751,8 +751,8 @@ declare const unsafeWindow: Window | undefined;
         wsConnected,
         wsReadyState: Number.isFinite(wsStatus.wsReadyState) ? wsStatus.wsReadyState : -1,
         lastErrorText,
-        lastInboundType: String(wsDebug?.lastInbound?.type || lastAdminMessageType || '-'),
-        lastInboundAt: Number(wsDebug?.lastInbound?.receivedAt || lastAdminMessageAt || 0),
+        lastInboundType: String(wsDebug?.lastInbound?.type || lastWebMapMessageType || '-'),
+        lastInboundAt: Number(wsDebug?.lastInbound?.receivedAt || lastWebMapMessageAt || 0),
         serverProtocolVersion: serverProtocolVersion || '-',
         roomCode: CONFIG.ROOM_CODE,
         targetDimension: CONFIG.TARGET_DIMENSION,
@@ -922,7 +922,7 @@ declare const unsafeWindow: Window | undefined;
     updateUiStatus();
   }
 
-  function sendAdminCommand(message: Record<string, unknown>) {
+  function sendWebMapCommand(message: Record<string, unknown>) {
     if (!wsClient) return false;
     const ok = wsClient.sendCommand(message);
     if (!ok) {
@@ -946,7 +946,7 @@ declare const unsafeWindow: Window | undefined;
     const color = normalizeColor(markForm.color || getConfiguredTeamColor(team, CONFIG), getConfiguredTeamColor(team, CONFIG));
     const label = markForm.label;
 
-    const ok = sendAdminCommand(buildCommandPlayerMarkSet({
+    const ok = sendWebMapCommand(buildCommandPlayerMarkSet({
       playerId: resolved.playerId,
       team,
       color,
@@ -968,7 +968,7 @@ declare const unsafeWindow: Window | undefined;
       return;
     }
 
-    const ok = sendAdminCommand(buildCommandPlayerMarkClear(resolved.playerId));
+    const ok = sendWebMapCommand(buildCommandPlayerMarkClear(resolved.playerId));
     if (ok) {
       autoMarkSync.clearPlayerCache(resolved.playerId);
       lastErrorText = null;
@@ -977,7 +977,7 @@ declare const unsafeWindow: Window | undefined;
   }
 
   function clearAllMarksOnServer() {
-    const ok = sendAdminCommand(buildCommandPlayerMarkClearAll());
+    const ok = sendWebMapCommand(buildCommandPlayerMarkClearAll());
     if (ok) {
       autoMarkSync.reset();
       lastErrorText = null;
@@ -986,7 +986,7 @@ declare const unsafeWindow: Window | undefined;
   }
 
   function setSameServerFilter(enabled: boolean) {
-    const ok = sendAdminCommand(buildCommandSameServerFilterSet(enabled));
+    const ok = sendWebMapCommand(buildCommandSameServerFilterSet(enabled));
     if (ok) {
       lastErrorText = null;
       updateUiStatus();
@@ -1198,7 +1198,7 @@ declare const unsafeWindow: Window | undefined;
 
     mapProjection.installLeafletHook();
 
-    wsClient = createAdminWsClient({
+    wsClient = createWebMapWsClient({
       getConfig: () => CONFIG,
       isDebugEnabled: () => isDebugPanelEnabled(),
       onSnapshotChanged: (snapshot) => {
@@ -1217,8 +1217,8 @@ declare const unsafeWindow: Window | undefined;
       onWsStatusChanged: (status) => {
         wsConnected = status.wsConnected;
         lastErrorText = status.lastErrorText;
-        lastAdminMessageType = status.lastAdminMessageType;
-        lastAdminMessageAt = status.lastAdminMessageAt;
+        lastWebMapMessageType = status.lastWebMapMessageType;
+        lastWebMapMessageAt = status.lastWebMapMessageAt;
         serverProtocolVersion = status.serverProtocolVersion;
         updateUiStatus();
       },
