@@ -38,6 +38,7 @@ type SettingsUiDeps = {
   onPlayerSelectionChanged: () => void;
   onTogglePlayerList: (visible: boolean) => void;
   onFocusMapPlayer: (playerId: string) => void;
+  onOverviewDimensionChanged: (dimension: string) => void;
   onDebugRequestResync: () => void;
   onDebugCopySnapshot: () => void;
   onDebugCopyLastMessage: () => void;
@@ -166,6 +167,20 @@ function createDefaultDebugState(): DebugState {
 
 type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection' | 'help';
 
+type OverviewState = {
+  wsConnected: boolean;
+  hasError: boolean;
+  markerCount: number;
+  battleChunkCount: number;
+  onlinePlayerCount: number;
+  mapPlayerCount: number;
+  roomCode: string;
+  targetDimension: string;
+  dimensionOptions: string[];
+  clientProtocolVersion: string;
+  serverProtocolVersion: string;
+};
+
 type OverlayFormState = {
   ADMIN_WS_URL: string;
   ROOM_CODE: string;
@@ -285,9 +300,10 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       mapPlayerCount: 0,
       roomCode: 'default',
       targetDimension: 'minecraft:overworld',
+      dimensionOptions: ['minecraft:overworld'],
       clientProtocolVersion: '-',
       serverProtocolVersion: '-',
-    },
+    } as OverviewState,
     dirty: {
       mainText: false,
       connection: false,
@@ -419,6 +435,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
         onPlayerSelectionChanged: deps.onPlayerSelectionChanged,
         onTogglePlayerList: deps.onTogglePlayerList,
         onFocusMapPlayer: deps.onFocusMapPlayer,
+        onOverviewDimensionChanged: deps.onOverviewDimensionChanged,
         onDebugRequestResync: deps.onDebugRequestResync,
         onDebugCopySnapshot: deps.onDebugCopySnapshot,
         onDebugCopyLastMessage: deps.onDebugCopyLastMessage,
@@ -581,12 +598,16 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       mapPlayerCount: number;
       roomCode: string;
       targetDimension: string;
+      dimensionOptions: string[];
       clientProtocolVersion: string;
       serverProtocolVersion: string;
     }>,
   ) {
     state.statusText = text;
     if (overviewPatch && typeof overviewPatch === 'object') {
+      if (Array.isArray(overviewPatch.dimensionOptions)) {
+        state.overview.dimensionOptions = overviewPatch.dimensionOptions.slice();
+      }
       Object.assign(state.overview, overviewPatch);
     }
   }
@@ -746,6 +767,12 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.sameServerFilterEnabled = Boolean(enabled);
   }
 
+  function setTargetDimension(dimension: string) {
+    const next = String(dimension || 'minecraft:overworld').trim() || 'minecraft:overworld';
+    state.form.TARGET_DIMENSION = next;
+    state.overview.targetDimension = next;
+  }
+
   function updateDebug(debugPatch: Partial<DebugState> | null | undefined) {
     if (!debugPatch || typeof debugPatch !== 'object') {
       return;
@@ -814,6 +841,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     getMarkForm,
     setMarkColor,
     setServerFilterEnabled,
+    setTargetDimension,
     updateDebug,
     setPlayerListVisible,
     setPanelVisible,

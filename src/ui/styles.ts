@@ -344,6 +344,21 @@ export const UI_STYLE_TEXT = `
     font-size: 17px;
     font-weight: 800;
   }
+  #nodemc-overlay-panel .n-metric-select {
+    margin-top: 1px;
+    border-color: rgba(148, 163, 184, 0.28);
+    background: rgba(248, 250, 252, 0.92);
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 7px 9px;
+  }
+  #nodemc-overlay-panel .n-metric-select:focus {
+    border-color: rgba(96, 165, 250, 0.7);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+    background: rgba(255, 255, 255, 0.98);
+  }
   #nodemc-overlay-panel .n-overview-card {
     margin-bottom: 12px;
   }

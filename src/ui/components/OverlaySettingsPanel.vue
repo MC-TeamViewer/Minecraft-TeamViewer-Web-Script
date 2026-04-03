@@ -28,6 +28,7 @@ type OverviewState = {
   mapPlayerCount: number;
   roomCode: string;
   targetDimension: string;
+  dimensionOptions: string[];
   clientProtocolVersion: string;
   serverProtocolVersion: string;
 };
@@ -186,6 +187,7 @@ type OverlayUiActions = {
   onPlayerSelectionChanged: () => void;
   onTogglePlayerList: (visible: boolean) => void;
   onFocusMapPlayer: (playerId: string) => void;
+  onOverviewDimensionChanged: (dimension: string) => void;
   onDebugRequestResync: () => void;
   onDebugCopySnapshot: () => void;
   onDebugCopyLastMessage: () => void;
@@ -244,6 +246,12 @@ function onServerFilterChange() {
 
 function onPlayerSelectionChanged() {
   props.actions.onPlayerSelectionChanged();
+}
+
+function onOverviewDimensionChanged() {
+  const next = String(props.state.overview.targetDimension || 'minecraft:overworld').trim() || 'minecraft:overworld';
+  props.state.form.TARGET_DIMENSION = next;
+  props.actions.onOverviewDimensionChanged(next);
 }
 
 function triggerAutoApply() {
@@ -387,6 +395,23 @@ function formatDimensionBucket(item: {
       <div class="n-metric-card">
         <div class="n-metric-label">房间号</div>
         <div class="n-metric-value">{{ state.overview.roomCode || 'default' }}</div>
+      </div>
+      <div class="n-metric-card">
+        <div class="n-metric-label">当前维度</div>
+        <select
+          id="nodemc-overview-dimension-select"
+          v-model="state.overview.targetDimension"
+          class="n-metric-select"
+          @change="onOverviewDimensionChanged"
+        >
+          <option
+            v-for="dimension in state.overview.dimensionOptions"
+            :key="dimension"
+            :value="dimension"
+          >
+            {{ dimension }}
+          </option>
+        </select>
       </div>
       <div class="n-metric-card">
         <div class="n-metric-label">在线玩家</div>
@@ -721,7 +746,7 @@ function formatDimensionBucket(item: {
         <input v-model="state.form.RECONNECT_INTERVAL_MS" @input="markConnectionDirty" id="nodemc-overlay-reconnect" type="number" min="200" max="60000" step="100" />
       </div>
       <div class="n-row">
-        <label>维度过滤</label>
+        <label>默认查看维度</label>
         <input v-model="state.form.TARGET_DIMENSION" @input="markConnectionDirty" id="nodemc-overlay-dim" type="text" placeholder="minecraft:overworld" />
       </div>
     </div>
@@ -949,7 +974,7 @@ function formatDimensionBucket(item: {
       <div class="n-help-content full-width">
         <ol class="n-help-list">
           <li>先看概览页状态。如果显示“待连接”或“需要处理”，优先进入“连接设置”。</li>
-          <li>在连接设置里填写 <b>Admin WS URL</b>、房间号和维度过滤，保存后会自动重连。</li>
+          <li>在连接设置里填写 <b>Admin WS URL</b>、房间号和默认查看维度，保存后会自动重连。</li>
           <li>需要给玩家分类或贴标签时，统一进入“标记”页处理，不在概览页重复操作。</li>
           <li>需要调整地图展示效果时，进入“显示”页统一修改尺寸、颜色和特殊显示。</li>
           <li>想快速看地图目标时，直接打开“地图玩家列表”，列表里点击玩家即可聚焦地图。</li>

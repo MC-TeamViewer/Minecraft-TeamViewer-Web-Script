@@ -271,6 +271,28 @@ declare const unsafeWindow: Window | undefined;
     };
   }
 
+  function getOverviewDimensionOptions(snapshot: Record<string, any> | null, targetDimension: string) {
+    const normalizedTarget = normalizeDimension(targetDimension) || DEFAULT_CONFIG.TARGET_DIMENSION;
+    const stats = getDimensionStats(snapshot, normalizedTarget);
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+
+    const append = (dimension: unknown) => {
+      const normalized = normalizeDimension(dimension);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      ordered.push(normalized);
+    };
+
+    append(DEFAULT_CONFIG.TARGET_DIMENSION);
+    append(normalizedTarget);
+    for (const item of stats.dimensions) {
+      append(item.dimension);
+    }
+
+    return ordered;
+  }
+
   function isDebugPanelEnabled() {
     return Boolean(CONFIG.DEBUG_PANEL_ENABLED);
   }
@@ -664,6 +686,10 @@ declare const unsafeWindow: Window | undefined;
   function updateUiStatus() {
     const mapCounts = mapProjection.getCounts();
     const annotations = mapCounts.markers + mapCounts.waypoints;
+    const dimensionOptions = getOverviewDimensionOptions(
+      latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : null,
+      CONFIG.TARGET_DIMENSION,
+    );
     settingsUi.updateStatus(lastErrorText ? `错误: ${lastErrorText}` : '',
       {
         wsConnected,
@@ -672,6 +698,7 @@ declare const unsafeWindow: Window | undefined;
         battleChunkCount: mapCounts.battleChunks,
         roomCode: CONFIG.ROOM_CODE,
         targetDimension: CONFIG.TARGET_DIMENSION,
+        dimensionOptions,
         clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
         serverProtocolVersion: serverProtocolVersion || '-',
       });
@@ -1020,6 +1047,16 @@ declare const unsafeWindow: Window | undefined;
     },
     onFocusMapPlayer: (playerId) => {
       focusMapPlayerById(playerId);
+    },
+    onOverviewDimensionChanged: (dimension) => {
+      const nextDimension = normalizeDimension(dimension) || DEFAULT_CONFIG.TARGET_DIMENSION;
+      CONFIG.TARGET_DIMENSION = nextDimension;
+      settingsUi.setTargetDimension(nextDimension);
+      saveConfigToStorage();
+      mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
+      refreshPlayerLists();
+      lastErrorText = null;
+      updateUiStatus();
     },
     onDebugRequestResync: () => {
       requestDebugResync();
