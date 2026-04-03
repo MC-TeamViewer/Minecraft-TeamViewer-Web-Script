@@ -235,7 +235,7 @@ export type WebMapOutboundPacket =
   | WaypointsDeletePacket;
 
 export type WebMapAckInboundPacket = {
-  type: 'admin_ack';
+  type: 'web_map_ack';
   ok: boolean;
   error?: string;
   action?: string;
@@ -414,7 +414,7 @@ export function parseWebMapInboundPacket(payload: unknown): WebMapInboundPacket 
   }
 
   switch (type) {
-    case 'admin_ack':
+    case 'web_map_ack':
     case 'handshake_ack':
     case 'pong':
     case 'snapshot_full':

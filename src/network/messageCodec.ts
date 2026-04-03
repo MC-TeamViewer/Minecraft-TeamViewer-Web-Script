@@ -2,19 +2,15 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import type { WebMapInboundPacket, WebMapOutboundPacket } from './networkSchemas';
 import { parseWebMapInboundPacket } from './networkSchemas';
 import {
-  AdminAckSchema,
   CommandPlayerMarkClearAllSchema,
   CommandPlayerMarkClearSchema,
   CommandPlayerMarkSetSchema,
   CommandSameServerFilterSetSchema,
   CommandTacticalWaypointSetSchema,
-  HandshakeAckSchema,
-  HandshakeRequestSchema,
-  PatchSchema,
-  PongSchema,
   ResyncRequestSchema,
-  SnapshotFullSchema,
   WaypointsDeleteSchema,
+  WebMapCommandSchema,
+  WebMapHandshakeRequestSchema,
   WireChannel,
   WireEnvelopeSchema,
 } from './proto/teamviewer/v1/teamviewer_pb';
@@ -39,7 +35,7 @@ function toScopePatch(scope: { upsert: Array<{ id: string; data?: Record<string,
 
 function decodeWebMapAck(message: any): WebMapInboundPacket | null {
   const payload: Record<string, unknown> = {
-    type: 'admin_ack',
+    type: 'web_map_ack',
     ok: Boolean(message.ok),
   };
   if (message.action !== undefined) payload.action = message.action;
@@ -120,10 +116,10 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
     switch (packet.type) {
       case 'handshake': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'handshakeRequest',
-            value: create(HandshakeRequestSchema, {
+            case: 'webMapHandshakeRequest',
+            value: create(WebMapHandshakeRequestSchema, {
               networkProtocolVersion: packet.networkProtocolVersion,
               minimumCompatibleNetworkProtocolVersion: packet.minimumCompatibleNetworkProtocolVersion,
               localProgramVersion: packet.localProgramVersion,
@@ -135,11 +131,16 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'resync_req': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'resyncRequest',
-            value: create(ResyncRequestSchema, {
-              reason: packet.reason,
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'resyncRequest',
+                value: create(ResyncRequestSchema, {
+                  reason: packet.reason,
+                }),
+              },
             }),
           },
         });
@@ -147,15 +148,20 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'command_player_mark_set': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'commandPlayerMarkSet',
-            value: create(CommandPlayerMarkSetSchema, {
-              playerId: packet.playerId,
-              team: packet.team,
-              color: packet.color,
-              label: packet.label,
-              source: packet.source,
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'setPlayerMark',
+                value: create(CommandPlayerMarkSetSchema, {
+                  playerId: packet.playerId,
+                  team: packet.team,
+                  color: packet.color,
+                  label: packet.label,
+                  source: packet.source,
+                }),
+              },
             }),
           },
         });
@@ -163,11 +169,16 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'command_player_mark_clear': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'commandPlayerMarkClear',
-            value: create(CommandPlayerMarkClearSchema, {
-              playerId: packet.playerId,
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'clearPlayerMark',
+                value: create(CommandPlayerMarkClearSchema, {
+                  playerId: packet.playerId,
+                }),
+              },
             }),
           },
         });
@@ -175,21 +186,31 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'command_player_mark_clear_all': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'commandPlayerMarkClearAll',
-            value: create(CommandPlayerMarkClearAllSchema, {}),
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'clearAllPlayerMarks',
+                value: create(CommandPlayerMarkClearAllSchema, {}),
+              },
+            }),
           },
         });
         return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
       }
       case 'command_same_server_filter_set': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'commandSameServerFilterSet',
-            value: create(CommandSameServerFilterSetSchema, {
-              enabled: Boolean(packet.enabled),
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'setSameServerFilter',
+                value: create(CommandSameServerFilterSetSchema, {
+                  enabled: Boolean(packet.enabled),
+                }),
+              },
             }),
           },
         });
@@ -197,19 +218,24 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'command_tactical_waypoint_set': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'commandTacticalWaypointSet',
-            value: create(CommandTacticalWaypointSetSchema, {
-              x: packet.x,
-              z: packet.z,
-              label: packet.label,
-              dimension: packet.dimension,
-              tacticalType: packet.tacticalType,
-              permanent: packet.permanent,
-              ttlSeconds: packet.ttlSeconds,
-              color: packet.color,
-              roomCode: packet.roomCode,
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'setTacticalWaypoint',
+                value: create(CommandTacticalWaypointSetSchema, {
+                  x: packet.x,
+                  z: packet.z,
+                  label: packet.label,
+                  dimension: packet.dimension,
+                  tacticalType: packet.tacticalType,
+                  permanent: packet.permanent,
+                  ttlSeconds: packet.ttlSeconds,
+                  color: packet.color,
+                  roomCode: packet.roomCode,
+                }),
+              },
             }),
           },
         });
@@ -217,11 +243,16 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       }
       case 'waypoints_delete': {
         const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.ADMIN,
+          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
           payload: {
-            case: 'waypointsDelete',
-            value: create(WaypointsDeleteSchema, {
-              waypointIds: packet.waypointIds,
+            case: 'webMapCommand',
+            value: create(WebMapCommandSchema, {
+              command: {
+                case: 'deleteWaypoints',
+                value: create(WaypointsDeleteSchema, {
+                  waypointIds: packet.waypointIds,
+                }),
+              },
             }),
           },
         });
@@ -247,7 +278,7 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
     }
 
     switch (envelope.payload.case) {
-      case 'adminAck':
+      case 'webMapAck':
         return decodeWebMapAck(envelope.payload.value);
       case 'handshakeAck':
         return parseWebMapInboundPacket({

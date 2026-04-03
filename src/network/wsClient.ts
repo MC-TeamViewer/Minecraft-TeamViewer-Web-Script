@@ -161,7 +161,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       lastHandshakeAck: record.type === 'handshake_ack' ? record : debugState.lastHandshakeAck,
       lastSnapshotFull: record.type === 'snapshot_full' ? record : debugState.lastSnapshotFull,
       lastPatch: record.type === 'patch' ? record : debugState.lastPatch,
-      lastWebMapAck: record.type === 'admin_ack' ? record : debugState.lastWebMapAck,
+      lastWebMapAck: record.type === 'web_map_ack' ? record : debugState.lastWebMapAck,
     };
   }
 
@@ -476,7 +476,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
         lastWebMapMessageType = payload?.type ? String(payload.type) : 'unknown';
         lastWebMapMessageAt = Date.now();
 
-        if (payload?.type === 'admin_ack') {
+        if (payload?.type === 'web_map_ack') {
           if (payload.ok) {
             lastErrorText = null;
           } else if (payload.error) {
