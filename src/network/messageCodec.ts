@@ -1,180 +1,113 @@
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import type { AdminInboundPacket, AdminOutboundPacket } from './networkSchemas';
-import { decode as decodeMsgpack, encode as encodeMsgpack } from '@msgpack/msgpack';
 import { parseAdminInboundPacket } from './networkSchemas';
+import {
+  AdminAckSchema,
+  CommandPlayerMarkClearAllSchema,
+  CommandPlayerMarkClearSchema,
+  CommandPlayerMarkSetSchema,
+  CommandSameServerFilterSetSchema,
+  CommandTacticalWaypointSetSchema,
+  HandshakeAckSchema,
+  HandshakeRequestSchema,
+  PatchSchema,
+  PongSchema,
+  ResyncRequestSchema,
+  SnapshotFullSchema,
+  WaypointsDeleteSchema,
+  WireChannel,
+  WireEnvelopeSchema,
+} from './proto/teamviewer/v1/teamviewer_pb';
 
-const UUID_SCALAR_KEYS = new Set([
-  'submitPlayerId',
-  'playerId',
-  'playerUUID',
-  'ownerId',
-  'targetEntityId',
-  'uuid',
-  'id',
-]);
-
-const UUID_LIST_KEYS = new Set([
-  'targetEntityIds',
-  'players',
-  'delete',
-  'deleteReports',
-  'connections',
-  'members',
-  'waypointIds',
-]);
-
-const UUID_KEYED_MAP_KEYS = new Set([
-  'players',
-  'entities',
-  'waypoints',
-  'playerMarks',
-  'reports',
-  'upsertReports',
-  'sourceToGroup',
-  'upsert',
-]);
-
-function bytesToUuid(value: unknown): string | null {
-  if (!(value instanceof Uint8Array) || value.length !== 16) {
-    return null;
+function toScopePatch(scope: { upsert: Array<{ id: string; data?: Record<string, unknown> }>; delete: string[] } | undefined) {
+  if (!scope) {
+    return undefined;
   }
-
-  const hex = Array.from(value).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function decodeMapKeyToStringOrNumber(key: unknown): string | number {
-  if (typeof key === 'string' || typeof key === 'number') {
-    return key;
-  }
-
-  if (key instanceof Uint8Array) {
-    return bytesToUuid(key) ?? Array.from(key).join(',');
-  }
-
-  if (key instanceof ArrayBuffer) {
-    const asBytes = new Uint8Array(key);
-    return bytesToUuid(asBytes) ?? Array.from(asBytes).join(',');
-  }
-
-  if (ArrayBuffer.isView(key)) {
-    const view = key as ArrayBufferView;
-    const asBytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-    return bytesToUuid(asBytes) ?? Array.from(asBytes).join(',');
-  }
-
-  return String(key);
-}
-
-function uuidToBytes(value: unknown): Uint8Array | null {
-  if (value instanceof Uint8Array && value.length === 16) {
-    return value;
-  }
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const text = value.trim().toLowerCase();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(text)) {
-    return null;
-  }
-  const pureHex = text.replace(/-/g, '');
-  const bytes = new Uint8Array(16);
-  for (let index = 0; index < 16; index += 1) {
-    const start = index * 2;
-    bytes[index] = parseInt(pureHex.slice(start, start + 2), 16);
-  }
-  return bytes;
-}
-
-function normalizeInboundUuidFields(payload: unknown, keyName?: string): unknown {
-  if (payload instanceof Map) {
-    const next: Record<string, unknown> = {};
-    for (const [rawKey, rawValue] of payload.entries()) {
-      let key: string;
-      if (rawKey instanceof Uint8Array && UUID_KEYED_MAP_KEYS.has(String(keyName || ''))) {
-        key = bytesToUuid(rawKey) ?? String(rawKey);
-      } else {
-        key = String(rawKey);
-      }
-      next[key] = normalizeInboundUuidFields(rawValue, key);
-    }
-    return next;
-  }
-
-  if (Array.isArray(payload)) {
-    if (keyName && UUID_LIST_KEYS.has(keyName)) {
-      return payload.map((item) => bytesToUuid(item) ?? normalizeInboundUuidFields(item, keyName));
-    }
-    return payload.map((item) => normalizeInboundUuidFields(item));
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    return payload;
-  }
-
-  const obj = payload as Record<string, unknown>;
-  const next: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (UUID_SCALAR_KEYS.has(key)) {
-      next[key] = bytesToUuid(value) ?? value;
+  const upsert: Record<string, unknown> = {};
+  for (const item of scope.upsert || []) {
+    if (!item || typeof item.id !== 'string' || !item.id) {
       continue;
     }
-
-    if (UUID_LIST_KEYS.has(key) && Array.isArray(value)) {
-      next[key] = value.map((item) => bytesToUuid(item) ?? normalizeInboundUuidFields(item));
-      continue;
-    }
-
-    next[key] = normalizeInboundUuidFields(value, key);
+    upsert[item.id] = item.data && typeof item.data === 'object' ? item.data : {};
   }
-  return next;
+  const deleteIds = Array.isArray(scope.delete) ? scope.delete.filter((item) => typeof item === 'string' && item) : [];
+  if (!Object.keys(upsert).length && !deleteIds.length) {
+    return undefined;
+  }
+  return { upsert, delete: deleteIds };
 }
 
-function normalizeOutboundUuidFields(payload: unknown, keyName?: string): unknown {
-  if (payload instanceof Map) {
-    const next = new Map<unknown, unknown>();
-    for (const [rawKey, rawValue] of payload.entries()) {
-      const outKey = UUID_KEYED_MAP_KEYS.has(String(keyName || '')) ? (uuidToBytes(rawKey) ?? rawKey) : rawKey;
-      const childKey = typeof rawKey === 'string' ? rawKey : undefined;
-      next.set(outKey, normalizeOutboundUuidFields(rawValue, childKey));
-    }
-    return next;
+function decodeAdminAck(message: any): AdminInboundPacket | null {
+  const payload: Record<string, unknown> = {
+    type: 'admin_ack',
+    ok: Boolean(message.ok),
+  };
+  if (message.action !== undefined) payload.action = message.action;
+  if (message.error !== undefined) payload.error = message.error;
+  if (message.command !== undefined) payload.command = message.command;
+
+  const detail = message.detail;
+  if (detail?.case === 'playerMark') {
+    if (detail.value?.playerId !== undefined) payload.playerId = detail.value.playerId;
+    if (detail.value?.mark !== undefined) payload.mark = detail.value.mark;
+  } else if (detail?.case === 'clearAllPlayerMarks') {
+    payload.removedCount = detail.value?.removedCount ?? 0;
+  } else if (detail?.case === 'sameServerFilter') {
+    payload.enabled = Boolean(detail.value?.enabled);
+  } else if (detail?.case === 'tacticalWaypoint') {
+    if (detail.value?.waypointId !== undefined) payload.waypointId = detail.value.waypointId;
+    if (detail.value?.waypoint !== undefined) payload.waypoint = detail.value.waypoint;
+  } else if (detail?.case === 'waypointsDelete') {
+    payload.waypointIds = Array.isArray(detail.value?.waypointIds) ? detail.value.waypointIds : [];
   }
 
-  if (Array.isArray(payload)) {
-    if (keyName && UUID_LIST_KEYS.has(keyName)) {
-      return payload.map((item) => uuidToBytes(item) ?? normalizeOutboundUuidFields(item, keyName));
-    }
-    return payload.map((item) => normalizeOutboundUuidFields(item));
+  return parseAdminInboundPacket(payload);
+}
+
+function decodeSnapshotFull(message: any): AdminInboundPacket | null {
+  return parseAdminInboundPacket({
+    type: 'snapshot_full',
+    players: message.players ?? {},
+    entities: message.entities ?? {},
+    waypoints: message.waypoints ?? {},
+    battleChunks: message.battleChunks ?? {},
+    playerMarks: message.playerMarks ?? {},
+    tabState: message.tabState ?? undefined,
+    roomCode: message.roomCode ?? undefined,
+    connections: Array.isArray(message.connections) ? message.connections : [],
+    connections_count: message.connectionsCount ?? undefined,
+    server_time: message.serverTime ?? undefined,
+  });
+}
+
+function decodePatch(message: any): AdminInboundPacket | null {
+  const meta: Record<string, unknown> = {};
+
+  if (message.tabStatePatch) {
+    meta.tabStatePatch = {
+      ...message.tabStatePatch,
+      groups: message.tabStatePatch.groups?.values ?? undefined,
+    };
   }
 
-  if (!payload || typeof payload !== 'object') {
-    return payload;
+  if (message.connections) {
+    meta.connections = message.connections.values ?? [];
   }
 
-  const obj = payload as Record<string, unknown>;
-  const next: Record<string, unknown> | Map<unknown, unknown> = UUID_KEYED_MAP_KEYS.has(String(keyName || ''))
-    ? new Map<unknown, unknown>()
-    : {};
-  for (const [key, value] of Object.entries(obj)) {
-    const outKey = UUID_KEYED_MAP_KEYS.has(String(keyName || '')) ? (uuidToBytes(key) ?? key) : key;
-    if (UUID_SCALAR_KEYS.has(key)) {
-      if (next instanceof Map) next.set(outKey, uuidToBytes(value) ?? value);
-      else next[key] = uuidToBytes(value) ?? value;
-      continue;
-    }
-
-    if (UUID_LIST_KEYS.has(key) && Array.isArray(value)) {
-      const converted = value.map((item) => uuidToBytes(item) ?? normalizeOutboundUuidFields(item));
-      if (next instanceof Map) next.set(outKey, converted);
-      else next[key] = converted;
-      continue;
-    }
-
-    const converted = normalizeOutboundUuidFields(value, key);
-    if (next instanceof Map) next.set(outKey, converted);
-    else next[key] = converted;
+  if (message.connectionsCount !== undefined) {
+    meta.connections_count = message.connectionsCount;
   }
-  return next;
+
+  return parseAdminInboundPacket({
+    type: 'patch',
+    players: toScopePatch(message.players),
+    entities: toScopePatch(message.entities),
+    waypoints: toScopePatch(message.waypoints),
+    battleChunks: toScopePatch(message.battleChunks),
+    playerMarks: toScopePatch(message.playerMarks),
+    meta: Object.keys(meta).length ? meta : undefined,
+    server_time: message.serverTime ?? undefined,
+  });
 }
 
 export interface NetworkMessageCodec {
@@ -182,32 +115,168 @@ export interface NetworkMessageCodec {
   decode(payload: ArrayBuffer | Uint8Array | string): AdminInboundPacket | null;
 }
 
-export class MsgpackNetworkMessageCodec implements NetworkMessageCodec {
+export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
   encode(packet: AdminOutboundPacket): ArrayBuffer {
-    const normalized = normalizeOutboundUuidFields(packet);
-    const encoded = encodeMsgpack(normalized);
-    return Uint8Array.from(encoded).buffer;
+    switch (packet.type) {
+      case 'handshake': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'handshakeRequest',
+            value: create(HandshakeRequestSchema, {
+              networkProtocolVersion: packet.networkProtocolVersion,
+              minimumCompatibleNetworkProtocolVersion: packet.minimumCompatibleNetworkProtocolVersion,
+              localProgramVersion: packet.localProgramVersion,
+              roomCode: packet.roomCode,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'resync_req': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'resyncRequest',
+            value: create(ResyncRequestSchema, {
+              reason: packet.reason,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'command_player_mark_set': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'commandPlayerMarkSet',
+            value: create(CommandPlayerMarkSetSchema, {
+              playerId: packet.playerId,
+              team: packet.team,
+              color: packet.color,
+              label: packet.label,
+              source: packet.source,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'command_player_mark_clear': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'commandPlayerMarkClear',
+            value: create(CommandPlayerMarkClearSchema, {
+              playerId: packet.playerId,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'command_player_mark_clear_all': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'commandPlayerMarkClearAll',
+            value: create(CommandPlayerMarkClearAllSchema, {}),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'command_same_server_filter_set': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'commandSameServerFilterSet',
+            value: create(CommandSameServerFilterSetSchema, {
+              enabled: Boolean(packet.enabled),
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'command_tactical_waypoint_set': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'commandTacticalWaypointSet',
+            value: create(CommandTacticalWaypointSetSchema, {
+              x: packet.x,
+              z: packet.z,
+              label: packet.label,
+              dimension: packet.dimension,
+              tacticalType: packet.tacticalType,
+              permanent: packet.permanent,
+              ttlSeconds: packet.ttlSeconds,
+              color: packet.color,
+              roomCode: packet.roomCode,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      case 'waypoints_delete': {
+        const envelope = create(WireEnvelopeSchema, {
+          channel: WireChannel.ADMIN,
+          payload: {
+            case: 'waypointsDelete',
+            value: create(WaypointsDeleteSchema, {
+              waypointIds: packet.waypointIds,
+            }),
+          },
+        });
+        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+      }
+      default:
+        throw new Error(`Unsupported admin outbound packet: ${(packet as { type?: string }).type || 'unknown'}`);
+    }
   }
 
   decode(payload: ArrayBuffer | Uint8Array | string): AdminInboundPacket | null {
-    let raw: Uint8Array;
     if (typeof payload === 'string') {
-      raw = new TextEncoder().encode(payload);
-    } else if (payload instanceof Uint8Array) {
-      raw = payload;
-    } else {
-      raw = new Uint8Array(payload);
+      return null;
     }
 
-    let parsed: unknown;
+    const raw = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+
+    let envelope;
     try {
-      parsed = decodeMsgpack(raw, {
-        mapKeyConverter: decodeMapKeyToStringOrNumber,
-      });
+      envelope = fromBinary(WireEnvelopeSchema, raw);
     } catch {
       return null;
     }
-    const normalized = normalizeInboundUuidFields(parsed);
-    return parseAdminInboundPacket(normalized);
+
+    switch (envelope.payload.case) {
+      case 'adminAck':
+        return decodeAdminAck(envelope.payload.value);
+      case 'handshakeAck':
+        return parseAdminInboundPacket({
+          type: 'handshake_ack',
+          ready: envelope.payload.value.ready,
+          networkProtocolVersion: envelope.payload.value.networkProtocolVersion,
+          minimumCompatibleNetworkProtocolVersion: envelope.payload.value.minimumCompatibleNetworkProtocolVersion,
+          localProgramVersion: envelope.payload.value.localProgramVersion,
+          roomCode: envelope.payload.value.roomCode,
+          error: envelope.payload.value.error,
+          rejectReason: envelope.payload.value.rejectReason,
+          digestIntervalSec: envelope.payload.value.digestIntervalSec,
+          broadcastHz: envelope.payload.value.broadcastHz,
+          reportIntervalTicks: envelope.payload.value.reportIntervalTicks,
+          playerTimeoutSec: envelope.payload.value.playerTimeoutSec,
+          entityTimeoutSec: envelope.payload.value.entityTimeoutSec,
+          battleChunkTimeoutSec: envelope.payload.value.battleChunkTimeoutSec,
+        });
+      case 'pong':
+        return parseAdminInboundPacket({
+          type: 'pong',
+          serverTime: envelope.payload.value.serverTime,
+        });
+      case 'snapshotFull':
+        return decodeSnapshotFull(envelope.payload.value);
+      case 'patch':
+        return decodePatch(envelope.payload.value);
+      default:
+        return null;
+    }
   }
 }

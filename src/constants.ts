@@ -53,6 +53,7 @@ export const DEFAULT_CONFIG = {
   TEAM_COLOR_ENEMY: '#ef4444',
   TEAM_COLOR_NEUTRAL: '#94a3b8',
   DEBUG: false,
+  DEBUG_PANEL_ENABLED: false,
 };
 
 export const TEAM_DEFAULT_COLORS = {

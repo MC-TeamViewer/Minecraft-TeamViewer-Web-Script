@@ -10,7 +10,8 @@
 	- `mapProjection.ts`：地图投影与渲染
 - `src/network/`：网络协议与 WS 客户端
 	- `networkSchemas.ts`：协议报文模型与构造函数
-	- `messageCodec.ts`：报文编解码抽象（默认 MessagePack）
+	- `messageCodec.ts`：报文编解码抽象（默认 ProtoBuf）
+	- `proto/`：由共享 `.proto` 生成的 TypeScript 协议代码
 	- `wsClient.ts`：管理端 WS 通道
 - `src/ui/`：UI 适配层与样式
 	- `settingsUi.ts`：Vue 面板适配
@@ -34,7 +35,8 @@
 ## 协议与元信息
 
 - 协议报文模型集中在 `src/network/networkSchemas.ts`。
-- 传输编解码由 `src/network/messageCodec.ts` 负责，默认使用 MessagePack（二进制帧）。
+- 传输编解码由 `src/network/messageCodec.ts` 负责，默认使用 ProtoBuf（二进制帧）。
+- 共享协议源位于后端仓库 `proto/teamviewer/v1/teamviewer.proto`，本仓库提交生成后的 TS 产物。
 - 协议版本、userscript 元信息、应用元信息集中在 `src/meta.ts`，避免分散硬编码。
 
 ## 配置导入/导出

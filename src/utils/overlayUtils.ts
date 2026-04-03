@@ -267,6 +267,7 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   next.TEAM_COLOR_ENEMY = normalizeColor(candidate.TEAM_COLOR_ENEMY, DEFAULT_CONFIG.TEAM_COLOR_ENEMY);
   next.TEAM_COLOR_NEUTRAL = normalizeColor(candidate.TEAM_COLOR_NEUTRAL, DEFAULT_CONFIG.TEAM_COLOR_NEUTRAL);
   next.DEBUG = Boolean(candidate.DEBUG);
+  next.DEBUG_PANEL_ENABLED = Boolean(candidate.DEBUG_PANEL_ENABLED);
   return next;
 }
 

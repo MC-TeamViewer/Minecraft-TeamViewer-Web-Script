@@ -165,6 +165,163 @@ declare const unsafeWindow: Window | undefined;
     return info ? info.autoName : null;
   }
 
+  function getTabOnlinePlayerCount() {
+    const tabState = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.tabState : null;
+    const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
+    if (!reports) return 0;
+
+    const ids = new Set<string>();
+    for (const report of Object.values(reports)) {
+      if (!report || typeof report !== 'object') continue;
+      const players = Array.isArray(report.players) ? report.players : [];
+      for (const node of players) {
+        if (!node || typeof node !== 'object') continue;
+        const playerId = String(node.uuid || node.id || node.name || '').trim();
+        if (playerId) ids.add(playerId);
+      }
+    }
+    return ids.size;
+  }
+
+  function getSnapshotScopeCounts(snapshot: Record<string, any> | null) {
+    return {
+      playersInSnapshot: snapshot && typeof snapshot.players === 'object' ? Object.keys(snapshot.players).length : 0,
+      entitiesInSnapshot: snapshot && typeof snapshot.entities === 'object' ? Object.keys(snapshot.entities).length : 0,
+      waypointsInSnapshot: snapshot && typeof snapshot.waypoints === 'object' ? Object.keys(snapshot.waypoints).length : 0,
+      battleChunksInSnapshot: snapshot && typeof snapshot.battleChunks === 'object' ? Object.keys(snapshot.battleChunks).length : 0,
+      tabReports: snapshot && snapshot.tabState && typeof snapshot.tabState.reports === 'object'
+        ? Object.keys(snapshot.tabState.reports).length
+        : 0,
+      connections: snapshot && Array.isArray(snapshot.connections) ? snapshot.connections.length : 0,
+    };
+  }
+
+  function getDimensionStats(snapshot: Record<string, any> | null, targetDimension: string) {
+    const wantedDim = normalizeDimension(targetDimension);
+    const buckets = new Map<string, {
+      dimension: string;
+      total: number;
+      players: number;
+      entities: number;
+      waypoints: number;
+      battleChunks: number;
+      matchesTarget: boolean;
+    }>();
+    let totalWithDimension = 0;
+    let matchingTarget = 0;
+    let missingDimension = 0;
+
+    const consumeScope = (
+      scope: Record<string, any> | null | undefined,
+      scopeName: 'players' | 'entities' | 'waypoints' | 'battleChunks',
+    ) => {
+      if (!scope || typeof scope !== 'object') return;
+      for (const rawNode of Object.values(scope)) {
+        const data = getPlayerDataNode(rawNode);
+        if (!data) continue;
+        const dim = normalizeDimension(data.dimension);
+        if (!dim) {
+          missingDimension += 1;
+          continue;
+        }
+        totalWithDimension += 1;
+        const matchesTarget = !wantedDim || dim === wantedDim;
+        if (matchesTarget) {
+          matchingTarget += 1;
+        }
+        const existing = buckets.get(dim) || {
+          dimension: dim,
+          total: 0,
+          players: 0,
+          entities: 0,
+          waypoints: 0,
+          battleChunks: 0,
+          matchesTarget,
+        };
+        existing.total += 1;
+        existing[scopeName] += 1;
+        existing.matchesTarget = existing.matchesTarget || matchesTarget;
+        buckets.set(dim, existing);
+      }
+    };
+
+    consumeScope(snapshot?.players, 'players');
+    consumeScope(snapshot?.entities, 'entities');
+    consumeScope(snapshot?.waypoints, 'waypoints');
+    consumeScope(snapshot?.battleChunks, 'battleChunks');
+
+    const dimensions = Array.from(buckets.values()).sort((a, b) => {
+      if (a.matchesTarget !== b.matchesTarget) {
+        return a.matchesTarget ? -1 : 1;
+      }
+      if (a.total !== b.total) {
+        return b.total - a.total;
+      }
+      return a.dimension.localeCompare(b.dimension);
+    });
+
+    return {
+      targetDimension: wantedDim,
+      totalWithDimension,
+      matchingTarget,
+      hiddenByDimension: Math.max(0, totalWithDimension - matchingTarget),
+      missingDimension,
+      dimensions,
+      hiddenDimensions: dimensions.filter((item) => !item.matchesTarget),
+    };
+  }
+
+  function isDebugPanelEnabled() {
+    return Boolean(CONFIG.DEBUG_PANEL_ENABLED);
+  }
+
+  function createDisabledDebugState() {
+    return {
+      diagnosis: [],
+      summary: {
+        wsConnected,
+        wsReadyState: Number.isFinite(wsClient?.getStatus?.().wsReadyState) ? Number(wsClient?.getStatus?.().wsReadyState) : -1,
+        lastErrorText,
+        lastInboundType: '-',
+        lastInboundAt: 0,
+        serverProtocolVersion: serverProtocolVersion || '-',
+        roomCode: CONFIG.ROOM_CODE,
+        targetDimension: CONFIG.TARGET_DIMENSION,
+        onlinePlayersFromTab: 0,
+        tabReports: 0,
+        playersInSnapshot: 0,
+        entitiesInSnapshot: 0,
+        waypointsInSnapshot: 0,
+        battleChunksInSnapshot: 0,
+        connections: 0,
+        mapReady: false,
+        hasLeafletRef: false,
+        hasCapturedMap: false,
+        mapContainerConnected: false,
+        markersOnMap: 0,
+        waypointsOnMap: 0,
+        battleChunksOnMap: 0,
+      },
+      json: {
+        lastInboundMessage: null,
+        lastSnapshotFull: null,
+        lastPatch: null,
+        latestSnapshot: null,
+      },
+      dimensionFilter: {
+        targetDimension: CONFIG.TARGET_DIMENSION,
+        totalWithDimension: 0,
+        matchingTarget: 0,
+        hiddenByDimension: 0,
+        missingDimension: 0,
+        dimensions: [],
+        hiddenDimensions: [],
+      },
+      history: [],
+      lastResyncRequest: null,
+    };
+  }
+
   function getOnlinePlayers() {
     const snapshotPlayers = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.players : null;
     const tabState = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.tabState : null;
@@ -398,6 +555,9 @@ declare const unsafeWindow: Window | undefined;
       }
       return ok;
     },
+    onDebugStateChanged: () => {
+      updateUiStatus();
+    },
   });
 
   function loadConfigFromStorage() {
@@ -515,6 +675,171 @@ declare const unsafeWindow: Window | undefined;
         clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
         serverProtocolVersion: serverProtocolVersion || '-',
       });
+    settingsUi.updateDebug(isDebugPanelEnabled() ? buildOverlayDebugState() : createDisabledDebugState());
+  }
+
+  function buildOverlayDebugState() {
+    if (!isDebugPanelEnabled()) {
+      return createDisabledDebugState();
+    }
+    const snapshot = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : null;
+    const wsStatus = wsClient?.getStatus() || {};
+    const wsDebug = wsClient?.getDebugState?.() || {};
+    const mapDebug = mapProjection.getDebugState();
+    const scopeCounts = getSnapshotScopeCounts(snapshot);
+    const onlinePlayersFromTab = getTabOnlinePlayerCount();
+    const renderedObjects = mapDebug.markers + mapDebug.waypoints + mapDebug.battleChunks;
+    const dimensionStats = getDimensionStats(snapshot, CONFIG.TARGET_DIMENSION);
+    const totalSnapshotObjects =
+      scopeCounts.playersInSnapshot +
+      scopeCounts.entitiesInSnapshot +
+      scopeCounts.waypointsInSnapshot +
+      scopeCounts.battleChunksInSnapshot;
+    const diagnosis: string[] = [];
+
+    if ((onlinePlayersFromTab > 0 || scopeCounts.tabReports > 0) && totalSnapshotObjects <= 0) {
+      diagnosis.push('当前只收到了 TAB/在线列表相关数据，地图对象数据尚未进入本地快照。');
+    }
+
+    if (totalSnapshotObjects > 0 && !mapDebug.mapReady) {
+      diagnosis.push('本地已收到对象数据，但地图尚未就绪或尚未完成重放。');
+    } else if (
+      totalSnapshotObjects > 0 &&
+      mapDebug.mapReady &&
+      renderedObjects <= 0 &&
+      dimensionStats.totalWithDimension > 0 &&
+      dimensionStats.matchingTarget <= 0
+    ) {
+      const hiddenDimensionText = dimensionStats.hiddenDimensions.length
+        ? dimensionStats.hiddenDimensions.map((item) => item.dimension).join('、')
+        : '未知维度';
+      diagnosis.push(`本地有对象，但被维度过滤隐藏。目标维度：${dimensionStats.targetDimension || '未设置'}；当前对象维度：${hiddenDimensionText}。`);
+    } else if (totalSnapshotObjects > 0 && mapDebug.mapReady && renderedObjects <= 0) {
+      diagnosis.push('本地已收到对象数据，但地图当前没有渲染出任何对象，请优先检查地图捕获和对象字段。');
+    }
+
+    return {
+      diagnosis,
+      summary: {
+        wsConnected,
+        wsReadyState: Number.isFinite(wsStatus.wsReadyState) ? wsStatus.wsReadyState : -1,
+        lastErrorText,
+        lastInboundType: String(wsDebug?.lastInbound?.type || lastAdminMessageType || '-'),
+        lastInboundAt: Number(wsDebug?.lastInbound?.receivedAt || lastAdminMessageAt || 0),
+        serverProtocolVersion: serverProtocolVersion || '-',
+        roomCode: CONFIG.ROOM_CODE,
+        targetDimension: CONFIG.TARGET_DIMENSION,
+        onlinePlayersFromTab,
+        tabReports: scopeCounts.tabReports,
+        playersInSnapshot: scopeCounts.playersInSnapshot,
+        entitiesInSnapshot: scopeCounts.entitiesInSnapshot,
+        waypointsInSnapshot: scopeCounts.waypointsInSnapshot,
+        battleChunksInSnapshot: scopeCounts.battleChunksInSnapshot,
+        connections: scopeCounts.connections,
+        mapReady: Boolean(mapDebug.mapReady),
+        hasLeafletRef: Boolean(mapDebug.hasLeafletRef),
+        hasCapturedMap: Boolean(mapDebug.hasCapturedMap),
+        mapContainerConnected: Boolean(mapDebug.mapContainerConnected),
+        markersOnMap: Number(mapDebug.markers || 0),
+        waypointsOnMap: Number(mapDebug.waypoints || 0),
+        battleChunksOnMap: Number(mapDebug.battleChunks || 0),
+      },
+      json: {
+        lastInboundMessage: wsDebug?.lastInbound?.payload ?? null,
+        lastSnapshotFull: wsDebug?.lastSnapshotFull?.payload ?? null,
+        lastPatch: wsDebug?.lastPatch?.payload ?? null,
+        latestSnapshot: snapshot,
+      },
+      dimensionFilter: {
+        targetDimension: dimensionStats.targetDimension || CONFIG.TARGET_DIMENSION,
+        totalWithDimension: dimensionStats.totalWithDimension,
+        matchingTarget: dimensionStats.matchingTarget,
+        hiddenByDimension: dimensionStats.hiddenByDimension,
+        missingDimension: dimensionStats.missingDimension,
+        dimensions: dimensionStats.dimensions,
+        hiddenDimensions: dimensionStats.hiddenDimensions,
+      },
+      history: Array.isArray(wsDebug?.history)
+        ? wsDebug.history.map((item: any) => ({
+            receivedAt: Number(item?.receivedAt || 0),
+            type: String(item?.type || 'unknown'),
+            channel: String(item?.channel || 'admin'),
+            counts: item?.counts && typeof item.counts === 'object' ? item.counts : {},
+          }))
+        : [],
+      lastResyncRequest: wsDebug?.lastResyncRequest || null,
+    };
+  }
+
+  function stringifyDebugJson(value: unknown) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  async function copyText(text: string) {
+    const content = String(text || '');
+    if (!content) return false;
+    try {
+      if (PAGE.navigator?.clipboard?.writeText) {
+        await PAGE.navigator.clipboard.writeText(content);
+        return true;
+      }
+    } catch (_) {}
+
+    try {
+      const input = document.createElement('textarea');
+      input.value = content;
+      input.style.position = 'fixed';
+      input.style.left = '-9999px';
+      input.style.top = '0';
+      document.body.appendChild(input);
+      input.focus();
+      input.select();
+      const ok = document.execCommand('copy');
+      input.remove();
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function copyDebugJson(label: string, value: unknown) {
+    const ok = await copyText(stringifyDebugJson(value));
+    if (ok) {
+      lastErrorText = null;
+      settingsUi.updateStatus(`调试: 已复制${label}`);
+    } else {
+      lastErrorText = `复制${label}失败`;
+    }
+    updateUiStatus();
+  }
+
+  function requestDebugResync() {
+    if (!isDebugPanelEnabled()) {
+      return;
+    }
+    const ok = wsClient?.requestResync?.('manual_debug_panel');
+    if (!ok) {
+      const status = wsClient?.getStatus?.();
+      lastErrorText = status?.lastErrorText || 'resync 请求未发送';
+    } else {
+      lastErrorText = null;
+      settingsUi.updateStatus('调试: 已发送 resync 请求');
+    }
+    updateUiStatus();
+  }
+
+  function clearDebugHistory() {
+    if (!isDebugPanelEnabled()) {
+      return;
+    }
+    wsClient?.clearDebugHistory?.();
+    lastErrorText = null;
+    settingsUi.updateStatus('调试: 已清空本地调试历史');
+    updateUiStatus();
   }
 
   function resolvePlayerIdFromInput() {
@@ -558,8 +883,12 @@ declare const unsafeWindow: Window | undefined;
   }
 
   function applyFormToConfig() {
+    const previousDebugPanelEnabled = isDebugPanelEnabled();
     const next = sanitizeConfig(settingsUi.readFormCandidate(CONFIG));
     Object.assign(CONFIG, next);
+    if (previousDebugPanelEnabled && !isDebugPanelEnabled()) {
+      wsClient?.clearDebugHistory?.();
+    }
     saveConfigToStorage();
     mapProjection.ensureMapInteractionGuard();
     mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
@@ -692,6 +1021,18 @@ declare const unsafeWindow: Window | undefined;
     onFocusMapPlayer: (playerId) => {
       focusMapPlayerById(playerId);
     },
+    onDebugRequestResync: () => {
+      requestDebugResync();
+    },
+    onDebugCopySnapshot: () => {
+      void copyDebugJson('当前快照 JSON', buildOverlayDebugState().json.latestSnapshot);
+    },
+    onDebugCopyLastMessage: () => {
+      void copyDebugJson('最近消息 JSON', buildOverlayDebugState().json.lastInboundMessage);
+    },
+    onDebugClearHistory: () => {
+      clearDebugHistory();
+    },
   });
 
   function installDebugConsoleApi() {
@@ -712,27 +1053,24 @@ declare const unsafeWindow: Window | undefined;
         return commands;
       },
       summary() {
-        const status = wsClient?.getStatus() || {};
-        const mapCounts = mapProjection.getCounts();
-        const snapshot = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : {};
+        if (!isDebugPanelEnabled()) {
+          return {
+            debugPanelEnabled: false,
+            message: '调试面板未启用',
+          };
+        }
+        const debugState = buildOverlayDebugState();
         return {
-          wsConnected,
-          wsReadyState: status.wsReadyState ?? -1,
-          lastErrorText,
+          ...debugState.summary,
           sameServerFilterEnabled,
-          playersCount: snapshot.players ? Object.keys(snapshot.players).length : 0,
-          entitiesCount: snapshot.entities ? Object.keys(snapshot.entities).length : 0,
-          waypointsCount: snapshot.waypoints ? Object.keys(snapshot.waypoints).length : 0,
-          battleChunksCount: snapshot.battleChunks ? Object.keys(snapshot.battleChunks).length : 0,
-          markersOnMap: mapCounts.markers,
-          waypointsOnMap: mapCounts.waypoints,
-          battleChunksOnMap: mapCounts.battleChunks,
-          lastAdminMessageType,
-          lastAdminMessageAt,
+          diagnosis: debugState.diagnosis,
         };
       },
       snapshot() {
-        return latestSnapshot;
+        if (!isDebugPanelEnabled()) {
+          return null;
+        }
+        return buildOverlayDebugState().json.latestSnapshot;
       },
       playerTab(playerId) {
         const normalizedId = String(playerId || '').trim();
@@ -751,25 +1089,27 @@ declare const unsafeWindow: Window | undefined;
         };
       },
       markers() {
-        return mapProjection.getCounts();
+        if (!isDebugPanelEnabled()) {
+          return { debugPanelEnabled: false };
+        }
+        return buildOverlayDebugState().summary;
       },
       ws() {
-        const status = wsClient?.getStatus() || {};
-        return {
-          url: CONFIG.ADMIN_WS_URL,
-          connected: wsConnected,
-          readyState: status.wsReadyState ?? -1,
-        };
+        if (!isDebugPanelEnabled()) {
+          return { debugPanelEnabled: false };
+        }
+        return buildOverlayDebugState().summary;
       },
       last() {
-        return {
-          type: lastAdminMessageType,
-          at: lastAdminMessageAt,
-        };
+        if (!isDebugPanelEnabled()) {
+          return null;
+        }
+        return buildOverlayDebugState().json.lastInboundMessage;
       },
       resync(reason = 'manual_console_debug') {
-        wsClient?.requestResync(reason);
-        return { requested: true, reason };
+        const requested = wsClient?.requestResync?.(reason);
+        updateUiStatus();
+        return { requested: Boolean(requested), reason };
       },
       ping() {
         if (!wsClient?.isWsOpen()) {
@@ -811,6 +1151,7 @@ declare const unsafeWindow: Window | undefined;
     mapProjection.ensureOverlayStyles();
     mapProjection.ensureMapInteractionGuard();
     mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
+    updateUiStatus();
   }
 
   function boot() {
@@ -823,6 +1164,7 @@ declare const unsafeWindow: Window | undefined;
 
     wsClient = createAdminWsClient({
       getConfig: () => CONFIG,
+      isDebugEnabled: () => isDebugPanelEnabled(),
       onSnapshotChanged: (snapshot) => {
         latestSnapshot = snapshot;
         sameServerFilterEnabled = Boolean(snapshot?.tabState?.enabled);

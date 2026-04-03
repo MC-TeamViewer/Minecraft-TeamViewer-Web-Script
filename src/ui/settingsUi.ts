@@ -38,8 +38,131 @@ type SettingsUiDeps = {
   onPlayerSelectionChanged: () => void;
   onTogglePlayerList: (visible: boolean) => void;
   onFocusMapPlayer: (playerId: string) => void;
+  onDebugRequestResync: () => void;
+  onDebugCopySnapshot: () => void;
+  onDebugCopyLastMessage: () => void;
+  onDebugClearHistory: () => void;
   getPlayerOptionColor?: (item: PlayerOption) => string | null;
 };
+
+type DebugSummaryState = {
+  wsConnected: boolean;
+  wsReadyState: number;
+  lastErrorText: string | null;
+  lastInboundType: string;
+  lastInboundAt: number;
+  serverProtocolVersion: string;
+  roomCode: string;
+  targetDimension: string;
+  onlinePlayersFromTab: number;
+  tabReports: number;
+  playersInSnapshot: number;
+  entitiesInSnapshot: number;
+  waypointsInSnapshot: number;
+  battleChunksInSnapshot: number;
+  connections: number;
+  mapReady: boolean;
+  hasLeafletRef: boolean;
+  hasCapturedMap: boolean;
+  mapContainerConnected: boolean;
+  markersOnMap: number;
+  waypointsOnMap: number;
+  battleChunksOnMap: number;
+};
+
+type DebugState = {
+  diagnosis: string[];
+  summary: DebugSummaryState;
+  json: {
+    lastInboundMessage: unknown;
+    lastSnapshotFull: unknown;
+    lastPatch: unknown;
+    latestSnapshot: unknown;
+  };
+  dimensionFilter: {
+    targetDimension: string;
+    totalWithDimension: number;
+    matchingTarget: number;
+    hiddenByDimension: number;
+    missingDimension: number;
+    dimensions: Array<{
+      dimension: string;
+      total: number;
+      players: number;
+      entities: number;
+      waypoints: number;
+      battleChunks: number;
+      matchesTarget: boolean;
+    }>;
+    hiddenDimensions: Array<{
+      dimension: string;
+      total: number;
+      players: number;
+      entities: number;
+      waypoints: number;
+      battleChunks: number;
+      matchesTarget: boolean;
+    }>;
+  };
+  history: Array<{
+    receivedAt: number;
+    type: string;
+    channel: string;
+    counts: Record<string, number>;
+  }>;
+  lastResyncRequest: {
+    requestedAt: number;
+    reason: string;
+    sent: boolean;
+  } | null;
+};
+
+function createDefaultDebugState(): DebugState {
+  return {
+    diagnosis: [],
+    summary: {
+      wsConnected: false,
+      wsReadyState: -1,
+      lastErrorText: null,
+      lastInboundType: '-',
+      lastInboundAt: 0,
+      serverProtocolVersion: '-',
+      roomCode: 'default',
+      targetDimension: 'minecraft:overworld',
+      onlinePlayersFromTab: 0,
+      tabReports: 0,
+      playersInSnapshot: 0,
+      entitiesInSnapshot: 0,
+      waypointsInSnapshot: 0,
+      battleChunksInSnapshot: 0,
+      connections: 0,
+      mapReady: false,
+      hasLeafletRef: false,
+      hasCapturedMap: false,
+      mapContainerConnected: false,
+      markersOnMap: 0,
+      waypointsOnMap: 0,
+      battleChunksOnMap: 0,
+    },
+    json: {
+      lastInboundMessage: null,
+      lastSnapshotFull: null,
+      lastPatch: null,
+      latestSnapshot: null,
+    },
+    dimensionFilter: {
+      targetDimension: 'minecraft:overworld',
+      totalWithDimension: 0,
+      matchingTarget: 0,
+      hiddenByDimension: 0,
+      missingDimension: 0,
+      dimensions: [],
+      hiddenDimensions: [],
+    },
+    history: [],
+    lastResyncRequest: null,
+  };
+}
 
 type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection' | 'help';
 
@@ -88,6 +211,7 @@ type OverlayFormState = {
   SHOW_WAYPOINT_ICON: boolean;
   SHOW_WAYPOINT_TEXT: boolean;
   DEBUG: boolean;
+  DEBUG_PANEL_ENABLED: boolean;
 };
 
 function createDefaultFormState(): OverlayFormState {
@@ -136,6 +260,7 @@ function createDefaultFormState(): OverlayFormState {
     SHOW_WAYPOINT_ICON: true,
     SHOW_WAYPOINT_TEXT: true,
     DEBUG: false,
+    DEBUG_PANEL_ENABLED: false,
   };
 }
 
@@ -179,6 +304,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       label: '',
     },
     form: createDefaultFormState(),
+    debug: createDefaultDebugState(),
   });
 
   function getRootHost() {
@@ -293,6 +419,10 @@ export function createSettingsUi(deps: SettingsUiDeps) {
         onPlayerSelectionChanged: deps.onPlayerSelectionChanged,
         onTogglePlayerList: deps.onTogglePlayerList,
         onFocusMapPlayer: deps.onFocusMapPlayer,
+        onDebugRequestResync: deps.onDebugRequestResync,
+        onDebugCopySnapshot: deps.onDebugCopySnapshot,
+        onDebugCopyLastMessage: deps.onDebugCopyLastMessage,
+        onDebugClearHistory: deps.onDebugClearHistory,
       },
       getPlayerOptionColor: deps.getPlayerOptionColor,
     });
@@ -508,6 +638,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.form.TEAM_COLOR_NEUTRAL = String(getConfiguredTeamColor('neutral'));
     state.form.TEAM_COLOR_ENEMY = String(getConfiguredTeamColor('enemy'));
     state.form.DEBUG = Boolean(config.DEBUG);
+    state.form.DEBUG_PANEL_ENABLED = Boolean(config.DEBUG_PANEL_ENABLED);
     state.dirty.mainText = false;
     state.dirty.connection = false;
     state.dirty.displayInputs = false;
@@ -562,6 +693,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
       SHOW_WAYPOINT_ICON: state.form.SHOW_WAYPOINT_ICON,
       SHOW_WAYPOINT_TEXT: state.form.SHOW_WAYPOINT_TEXT,
       DEBUG: state.form.DEBUG,
+      DEBUG_PANEL_ENABLED: state.form.DEBUG_PANEL_ENABLED,
     };
   }
 
@@ -614,6 +746,36 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     state.sameServerFilterEnabled = Boolean(enabled);
   }
 
+  function updateDebug(debugPatch: Partial<DebugState> | null | undefined) {
+    if (!debugPatch || typeof debugPatch !== 'object') {
+      return;
+    }
+    if (Array.isArray(debugPatch.diagnosis)) {
+      state.debug.diagnosis = debugPatch.diagnosis.slice();
+    }
+    if (debugPatch.summary && typeof debugPatch.summary === 'object') {
+      Object.assign(state.debug.summary, debugPatch.summary);
+    }
+    if (debugPatch.json && typeof debugPatch.json === 'object') {
+      Object.assign(state.debug.json, debugPatch.json);
+    }
+    if (debugPatch.dimensionFilter && typeof debugPatch.dimensionFilter === 'object') {
+      Object.assign(state.debug.dimensionFilter, debugPatch.dimensionFilter);
+      if (Array.isArray(debugPatch.dimensionFilter.dimensions)) {
+        state.debug.dimensionFilter.dimensions = debugPatch.dimensionFilter.dimensions.slice();
+      }
+      if (Array.isArray(debugPatch.dimensionFilter.hiddenDimensions)) {
+        state.debug.dimensionFilter.hiddenDimensions = debugPatch.dimensionFilter.hiddenDimensions.slice();
+      }
+    }
+    if (Array.isArray(debugPatch.history)) {
+      state.debug.history = debugPatch.history.slice();
+    }
+    if (debugPatch.lastResyncRequest !== undefined) {
+      state.debug.lastResyncRequest = debugPatch.lastResyncRequest || null;
+    }
+  }
+
   function cleanup() {
     try {
       if (vueApp) {
@@ -652,6 +814,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     getMarkForm,
     setMarkColor,
     setServerFilterEnabled,
+    updateDebug,
     setPlayerListVisible,
     setPanelVisible,
     cleanup,

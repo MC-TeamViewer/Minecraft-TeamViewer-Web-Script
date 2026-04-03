@@ -32,6 +32,7 @@ type MapProjectionDeps = {
   onDeleteTacticalWaypoint?: (payload: {
     waypointId: string;
   }) => boolean;
+  onDebugStateChanged?: () => void;
 };
 
 export function createMapProjection(deps: MapProjectionDeps) {
@@ -42,6 +43,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let leafletRef: any = null;
   let capturedMap: any = null;
   let lastGlobalMapScanAt = 0;
+  let latestSnapshotForReplay: any = null;
+  let pendingSnapshotReplayTimer: ReturnType<typeof setTimeout> | null = null;
   let guardedMapContainer: HTMLElement | null = null;
   let hoverPopupBlockedContainer: HTMLElement | null = null;
   let tacticalMenuEl: HTMLElement | null = null;
@@ -54,6 +57,34 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
+
+  function emitDebugStateChanged() {
+    try {
+      deps.onDebugStateChanged?.();
+    } catch (_) {}
+  }
+
+  function scheduleSnapshotReplay() {
+    if (!latestSnapshotForReplay) return;
+    if (pendingSnapshotReplayTimer !== null) return;
+    pendingSnapshotReplayTimer = setTimeout(() => {
+      pendingSnapshotReplayTimer = null;
+      applyLatestSnapshotIfPossible(latestSnapshotForReplay);
+    }, 0);
+  }
+
+  function attachMapReadyReplay(map: any) {
+    if (!map || typeof map.whenReady !== 'function' || map.__nodemcSnapshotReplayHooked) {
+      return;
+    }
+    map.__nodemcSnapshotReplayHooked = true;
+    try {
+      map.whenReady(() => {
+        scheduleSnapshotReplay();
+        emitDebugStateChanged();
+      });
+    } catch (_) {}
+  }
 
   type ReporterEffectEntry = {
     kind: 'vision' | 'chunkArea';
@@ -652,7 +683,13 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function captureMap(value: any) {
     if (!isLeafletMapCandidate(value)) return null;
+    const changed = capturedMap !== value;
     capturedMap = value;
+    attachMapReadyReplay(value);
+    if (changed) {
+      scheduleSnapshotReplay();
+      emitDebugStateChanged();
+    }
     return value;
   }
 
@@ -1942,12 +1979,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
   }
 
   function applyLatestSnapshotIfPossible(snapshot: any) {
+    latestSnapshotForReplay = snapshot;
     if (!snapshot) return false;
     ensureOverlayStyles();
     const map = capturedMap || findMapByDom();
     ensureMapInteractionGuard();
     if (!map || !leafletRef || !map._loaded) return false;
     applySnapshotPlayers(map, snapshot);
+    emitDebugStateChanged();
     return true;
   }
 
@@ -1974,6 +2013,20 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function getCounts() {
     return {
+      markers: markersById.size,
+      waypoints: waypointsById.size,
+      battleChunks: battleChunkLayersById.size,
+    };
+  }
+
+  function getDebugState() {
+    const map = capturedMap || findMapByDom();
+    const container = map && map._container instanceof HTMLElement ? map._container : null;
+    return {
+      mapReady: Boolean(map && leafletRef && map._loaded),
+      hasLeafletRef: Boolean(leafletRef),
+      hasCapturedMap: Boolean(capturedMap),
+      mapContainerConnected: Boolean(container && container.isConnected),
       markers: markersById.size,
       waypoints: waypointsById.size,
       battleChunks: battleChunkLayersById.size,
@@ -2010,6 +2063,11 @@ export function createMapProjection(deps: MapProjectionDeps) {
       const blockStyle = document.getElementById('nodemc-map-hover-popup-style');
       if (blockStyle) blockStyle.remove();
     } catch (_) {}
+    if (pendingSnapshotReplayTimer !== null) {
+      try { clearTimeout(pendingSnapshotReplayTimer); } catch (_) {}
+      pendingSnapshotReplayTimer = null;
+    }
+    emitDebugStateChanged();
   }
 
   return {
@@ -2021,6 +2079,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     applyLatestSnapshotIfPossible,
     focusOnWorldPosition,
     getCounts,
+    getDebugState,
     cleanup,
   };
 }

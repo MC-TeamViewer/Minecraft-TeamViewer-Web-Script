@@ -96,6 +96,76 @@ type OverlayUiState = {
     SHOW_WAYPOINT_ICON: boolean;
     SHOW_WAYPOINT_TEXT: boolean;
     DEBUG: boolean;
+    DEBUG_PANEL_ENABLED: boolean;
+  };
+  debug: {
+    diagnosis: string[];
+    summary: {
+      wsConnected: boolean;
+      wsReadyState: number;
+      lastErrorText: string | null;
+      lastInboundType: string;
+      lastInboundAt: number;
+      serverProtocolVersion: string;
+      roomCode: string;
+      targetDimension: string;
+      onlinePlayersFromTab: number;
+      tabReports: number;
+      playersInSnapshot: number;
+      entitiesInSnapshot: number;
+      waypointsInSnapshot: number;
+      battleChunksInSnapshot: number;
+      connections: number;
+      mapReady: boolean;
+      hasLeafletRef: boolean;
+      hasCapturedMap: boolean;
+      mapContainerConnected: boolean;
+      markersOnMap: number;
+      waypointsOnMap: number;
+      battleChunksOnMap: number;
+    };
+    json: {
+      lastInboundMessage: unknown;
+      lastSnapshotFull: unknown;
+      lastPatch: unknown;
+      latestSnapshot: unknown;
+    };
+    dimensionFilter: {
+      targetDimension: string;
+      totalWithDimension: number;
+      matchingTarget: number;
+      hiddenByDimension: number;
+      missingDimension: number;
+      dimensions: Array<{
+        dimension: string;
+        total: number;
+        players: number;
+        entities: number;
+        waypoints: number;
+        battleChunks: number;
+        matchesTarget: boolean;
+      }>;
+      hiddenDimensions: Array<{
+        dimension: string;
+        total: number;
+        players: number;
+        entities: number;
+        waypoints: number;
+        battleChunks: number;
+        matchesTarget: boolean;
+      }>;
+    };
+    history: Array<{
+      receivedAt: number;
+      type: string;
+      channel: string;
+      counts: Record<string, number>;
+    }>;
+    lastResyncRequest: {
+      requestedAt: number;
+      reason: string;
+      sent: boolean;
+    } | null;
   };
 };
 
@@ -116,6 +186,10 @@ type OverlayUiActions = {
   onPlayerSelectionChanged: () => void;
   onTogglePlayerList: (visible: boolean) => void;
   onFocusMapPlayer: (playerId: string) => void;
+  onDebugRequestResync: () => void;
+  onDebugCopySnapshot: () => void;
+  onDebugCopyLastMessage: () => void;
+  onDebugClearHistory: () => void;
 };
 
 const props = defineProps<{
@@ -146,6 +220,10 @@ const statusTitle = computed(() => {
   if (props.state.overview.wsConnected) return '运行中';
   return '待连接';
 });
+
+const debugLastInboundTime = computed(() => formatTimestamp(props.state.debug.summary.lastInboundAt));
+const debugLastResyncTime = computed(() => formatTimestamp(props.state.debug.lastResyncRequest?.requestedAt || 0));
+const debugDimensionTarget = computed(() => props.state.debug.dimensionFilter.targetDimension || props.state.debug.summary.targetDimension || '-');
 
 function setPage(nextPage: OverlayUiState['page']) {
   configMenuVisible.value = false;
@@ -242,6 +320,37 @@ function applyTeamPreset(team: string) {
 
 function applyQuickLabel(label: string) {
   props.state.mark.label = label;
+}
+
+function formatTimestamp(value: number | null | undefined) {
+  const ts = Number(value);
+  if (!Number.isFinite(ts) || ts <= 0) return '-';
+  try {
+    return new Date(ts).toLocaleString();
+  } catch (_) {
+    return '-';
+  }
+}
+
+function formatJson(value: unknown) {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function formatDimensionBucket(item: {
+  dimension: string;
+  total: number;
+  players: number;
+  entities: number;
+  waypoints: number;
+  battleChunks: number;
+}) {
+  return `总计 ${item.total} / P${item.players} / E${item.entities} / W${item.waypoints} / B${item.battleChunks}`;
 }
 </script>
 
@@ -639,7 +748,193 @@ function applyQuickLabel(label: string) {
       </div>
       <label class="n-check"><input v-model="state.form.BLOCK_MAP_HOVER_POPUP" @change="triggerAutoApply" id="nodemc-overlay-block-map-hover-popup" type="checkbox" />屏蔽原网页地图鼠标悬浮弹窗</label>
       <label class="n-check"><input v-model="state.form.DEBUG" @change="triggerAutoApply" id="nodemc-overlay-debug" type="checkbox" />调试日志</label>
+      <label class="n-check"><input v-model="state.form.DEBUG_PANEL_ENABLED" @change="triggerAutoApply" id="nodemc-overlay-debug-panel-enabled" type="checkbox" />启用接收链路调试面板</label>
       <label class="n-check"><input v-model="state.sameServerFilterEnabled" @change="onServerFilterChange" id="nodemc-overlay-server-filter" type="checkbox" />同服隔离广播（服务端）</label>
+    </div>
+
+    <div v-if="state.form.DEBUG_PANEL_ENABLED" class="n-card">
+      <div class="n-subtitle">接收链路调试</div>
+      <div class="n-debug-summary-grid full-width">
+        <div class="n-debug-summary-item">
+          <span>WS</span>
+          <strong>{{ state.debug.summary.wsConnected ? '已连接' : '未连接' }}</strong>
+        </div>
+        <div class="n-debug-summary-item">
+          <span>最近消息</span>
+          <strong>{{ state.debug.summary.lastInboundType || '-' }}</strong>
+        </div>
+        <div class="n-debug-summary-item">
+          <span>收到时间</span>
+          <strong>{{ debugLastInboundTime }}</strong>
+        </div>
+        <div class="n-debug-summary-item">
+          <span>地图状态</span>
+          <strong>{{ state.debug.summary.mapReady ? 'ready' : 'not ready' }}</strong>
+        </div>
+        <div class="n-debug-summary-item">
+          <span>目标房间</span>
+          <strong>{{ state.debug.summary.roomCode || 'default' }}</strong>
+        </div>
+        <div class="n-debug-summary-item">
+          <span>目标维度</span>
+          <strong>{{ state.debug.summary.targetDimension || '-' }}</strong>
+        </div>
+      </div>
+
+      <div v-if="state.debug.diagnosis.length" class="n-debug-diagnosis-list full-width">
+        <div
+          v-for="item in state.debug.diagnosis"
+          :key="item"
+          class="n-debug-diagnosis"
+        >
+          {{ item }}
+        </div>
+      </div>
+
+      <div class="n-debug-metric-grid full-width">
+        <div class="n-debug-metric-card">
+          <span>Tab 在线玩家</span>
+          <strong>{{ state.debug.summary.onlinePlayersFromTab }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>Tab 报告源</span>
+          <strong>{{ state.debug.summary.tabReports }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>快照玩家</span>
+          <strong>{{ state.debug.summary.playersInSnapshot }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>快照实体</span>
+          <strong>{{ state.debug.summary.entitiesInSnapshot }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>快照路标</span>
+          <strong>{{ state.debug.summary.waypointsInSnapshot }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>战局区块</span>
+          <strong>{{ state.debug.summary.battleChunksInSnapshot }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>连接来源</span>
+          <strong>{{ state.debug.summary.connections }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>地图标记</span>
+          <strong>{{ state.debug.summary.markersOnMap }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>地图路标</span>
+          <strong>{{ state.debug.summary.waypointsOnMap }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>地图区块</span>
+          <strong>{{ state.debug.summary.battleChunksOnMap }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>Leaflet</span>
+          <strong>{{ state.debug.summary.hasLeafletRef ? '已获取' : '未获取' }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>Map 容器</span>
+          <strong>{{ state.debug.summary.mapContainerConnected ? '已挂载' : '未挂载' }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>维度命中对象</span>
+          <strong>{{ state.debug.dimensionFilter.matchingTarget }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>维度隐藏对象</span>
+          <strong>{{ state.debug.dimensionFilter.hiddenByDimension }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>对象维度字段</span>
+          <strong>{{ state.debug.dimensionFilter.totalWithDimension }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>缺少维度字段</span>
+          <strong>{{ state.debug.dimensionFilter.missingDimension }}</strong>
+        </div>
+      </div>
+
+      <div class="n-debug-resync full-width">
+        <span>最近 resync</span>
+        <strong>
+          {{ state.debug.lastResyncRequest ? `${debugLastResyncTime} / ${state.debug.lastResyncRequest.reason} / ${state.debug.lastResyncRequest.sent ? '已发送' : '未发送'}` : '暂无' }}
+        </strong>
+      </div>
+
+      <details class="n-debug-details full-width" :open="state.debug.dimensionFilter.hiddenByDimension > 0">
+        <summary>维度过滤详情</summary>
+        <div class="n-debug-dimension-list">
+          <div class="n-debug-dimension-row">
+            <span>目标维度</span>
+            <strong>{{ debugDimensionTarget }}</strong>
+          </div>
+          <div
+            v-for="item in state.debug.dimensionFilter.dimensions"
+            :key="item.dimension"
+            class="n-debug-dimension-row"
+          >
+            <div class="n-debug-dimension-main">
+              <strong>{{ item.dimension }}</strong>
+              <span>{{ formatDimensionBucket(item) }}</span>
+            </div>
+            <span class="n-debug-dimension-badge" :class="{ 'is-match': item.matchesTarget, 'is-hidden': !item.matchesTarget }">
+              {{ item.matchesTarget ? '命中当前维度' : '被当前维度隐藏' }}
+            </span>
+          </div>
+          <div v-if="!state.debug.dimensionFilter.dimensions.length" class="n-debug-dimension-empty">
+            当前本地对象里还没有可用的维度字段。
+          </div>
+        </div>
+      </details>
+
+      <div class="n-btns">
+        <button type="button" class="n-btn-primary" @click="actions.onDebugRequestResync">手动 resync</button>
+        <button type="button" class="n-btn-ghost" @click="actions.onDebugCopySnapshot">复制当前快照 JSON</button>
+        <button type="button" class="n-btn-ghost" @click="actions.onDebugCopyLastMessage">复制最近消息 JSON</button>
+        <button type="button" class="n-btn-danger" @click="actions.onDebugClearHistory">清空调试历史</button>
+      </div>
+
+      <details class="n-debug-details full-width">
+        <summary>最近消息历史（{{ state.debug.history.length }}）</summary>
+        <div class="n-debug-history-list">
+          <div
+            v-for="item in state.debug.history"
+            :key="`${item.receivedAt}-${item.type}`"
+            class="n-debug-history-row"
+          >
+            <span>{{ formatTimestamp(item.receivedAt) }}</span>
+            <strong>{{ item.type }}</strong>
+            <small>
+              P{{ item.counts.players || 0 }}
+              / E{{ item.counts.entities || 0 }}
+              / W{{ item.counts.waypoints || 0 }}
+              / B{{ item.counts.battleChunks || 0 }}
+              / T{{ item.counts.tabReports || 0 }}
+            </small>
+          </div>
+        </div>
+      </details>
+
+      <details class="n-debug-details full-width">
+        <summary>最近一条入站消息</summary>
+        <pre class="n-debug-json">{{ formatJson(state.debug.json.lastInboundMessage) }}</pre>
+      </details>
+      <details class="n-debug-details full-width">
+        <summary>最近一次 snapshot_full</summary>
+        <pre class="n-debug-json">{{ formatJson(state.debug.json.lastSnapshotFull) }}</pre>
+      </details>
+      <details class="n-debug-details full-width">
+        <summary>最近一次 patch</summary>
+        <pre class="n-debug-json">{{ formatJson(state.debug.json.lastPatch) }}</pre>
+      </details>
+      <details class="n-debug-details full-width">
+        <summary>当前 latestSnapshot</summary>
+        <pre class="n-debug-json">{{ formatJson(state.debug.json.latestSnapshot) }}</pre>
+      </details>
     </div>
   </div>
 

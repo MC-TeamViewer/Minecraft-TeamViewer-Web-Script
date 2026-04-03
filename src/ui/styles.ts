@@ -651,6 +651,165 @@ export const UI_STYLE_TEXT = `
     border-radius: 8px;
     padding: 6px 8px;
   }
+  #nodemc-overlay-panel .n-debug-summary-grid,
+  #nodemc-overlay-panel .n-debug-metric-grid {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #nodemc-overlay-panel .n-debug-summary-item,
+  #nodemc-overlay-panel .n-debug-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 9px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(255, 255, 255, 0.7);
+  }
+  #nodemc-overlay-panel .n-debug-summary-item span,
+  #nodemc-overlay-panel .n-debug-metric-card span,
+  #nodemc-overlay-panel .n-debug-resync span {
+    color: #64748b;
+    font-size: 10px;
+  }
+  #nodemc-overlay-panel .n-debug-summary-item strong,
+  #nodemc-overlay-panel .n-debug-metric-card strong,
+  #nodemc-overlay-panel .n-debug-resync strong {
+    color: #0f172a;
+    font-size: 12px;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  #nodemc-overlay-panel .n-debug-diagnosis-list {
+    display: grid;
+    gap: 7px;
+  }
+  #nodemc-overlay-panel .n-debug-diagnosis {
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(59, 130, 246, 0.22);
+    background: rgba(239, 246, 255, 0.9);
+    color: #1e3a8a;
+    line-height: 1.45;
+  }
+  #nodemc-overlay-panel .n-debug-resync {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(59, 130, 246, 0.35);
+    background: rgba(219, 234, 254, 0.55);
+  }
+  #nodemc-overlay-panel .n-debug-details {
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.6);
+    overflow: hidden;
+  }
+  #nodemc-overlay-panel .n-debug-details summary {
+    cursor: pointer;
+    padding: 9px 10px;
+    font-weight: 700;
+    color: #1e3a8a;
+    user-select: none;
+    background: rgba(219, 234, 254, 0.5);
+  }
+  #nodemc-overlay-panel .n-debug-details[open] summary {
+    border-bottom: 1px solid rgba(59, 130, 246, 0.16);
+  }
+  #nodemc-overlay-panel .n-debug-json {
+    margin: 0;
+    padding: 10px;
+    max-height: 280px;
+    overflow: auto;
+    background: rgba(15, 23, 42, 0.92);
+    color: #dbeafe;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #nodemc-overlay-panel .n-debug-history-list {
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+  }
+  #nodemc-overlay-panel .n-debug-history-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: 8px;
+    align-items: center;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: rgba(239, 246, 255, 0.72);
+    color: #334155;
+  }
+  #nodemc-overlay-panel .n-debug-history-row strong {
+    color: #1e3a8a;
+  }
+  #nodemc-overlay-panel .n-debug-history-row small {
+    color: #475569;
+    text-align: right;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-list {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 9px;
+    border-radius: 9px;
+    background: rgba(239, 246, 255, 0.72);
+    color: #334155;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-main strong {
+    color: #0f172a;
+    font-size: 12px;
+    word-break: break-word;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-main span,
+  #nodemc-overlay-panel .n-debug-dimension-empty {
+    color: #475569;
+    font-size: 11px;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-badge {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(255, 255, 255, 0.82);
+    color: #475569;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-badge.is-match {
+    border-color: rgba(34, 197, 94, 0.24);
+    background: rgba(220, 252, 231, 0.9);
+    color: #166534;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-badge.is-hidden {
+    border-color: rgba(245, 158, 11, 0.24);
+    background: rgba(254, 243, 199, 0.92);
+    color: #92400e;
+  }
+  #nodemc-overlay-panel .n-debug-dimension-empty {
+    padding: 2px 0;
+  }
   @media (max-width: 430px) {
     #nodemc-overlay-panel {
       width: min(390px, calc(100vw - 12px));
@@ -661,7 +820,9 @@ export const UI_STYLE_TEXT = `
     #nodemc-overlay-panel .n-primary-tabs,
     #nodemc-overlay-panel .n-metric-grid,
     #nodemc-overlay-panel .n-quick-grid,
-    #nodemc-overlay-panel .n-segmented {
+    #nodemc-overlay-panel .n-segmented,
+    #nodemc-overlay-panel .n-debug-summary-grid,
+    #nodemc-overlay-panel .n-debug-metric-grid {
       grid-template-columns: 1fr;
     }
     #nodemc-overlay-panel .n-header-top,
@@ -679,6 +840,16 @@ export const UI_STYLE_TEXT = `
     #nodemc-overlay-panel .n-btns button {
       flex: 1;
       min-width: 42%;
+    }
+    #nodemc-overlay-panel .n-debug-history-row {
+      grid-template-columns: 1fr;
+    }
+    #nodemc-overlay-panel .n-debug-history-row small {
+      text-align: left;
+    }
+    #nodemc-overlay-panel .n-debug-dimension-row {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
 `;

@@ -12,12 +12,47 @@ import {
   buildAdminResyncRequest,
   createEmptyAdminSnapshotModel,
 } from './networkSchemas';
-import { MsgpackNetworkMessageCodec } from './messageCodec';
+import { ProtobufNetworkMessageCodec } from './messageCodec';
 
 type Snapshot = AdminSnapshot & Record<string, any>;
 
+type ScopeDebugCounts = {
+  players: number;
+  entities: number;
+  waypoints: number;
+  battleChunks: number;
+  playerMarks: number;
+  tabReports: number;
+  connections: number;
+};
+
+type WsDebugMessageRecord = {
+  receivedAt: number;
+  type: string;
+  channel: 'admin';
+  counts: ScopeDebugCounts;
+  payload: Record<string, unknown> | null;
+};
+
+type WsDebugState = {
+  history: WsDebugMessageRecord[];
+  lastInbound: WsDebugMessageRecord | null;
+  lastHandshakeAck: WsDebugMessageRecord | null;
+  lastSnapshotFull: WsDebugMessageRecord | null;
+  lastPatch: WsDebugMessageRecord | null;
+  lastAdminAck: WsDebugMessageRecord | null;
+  lastResyncRequest: {
+    requestedAt: number;
+    reason: string;
+    sent: boolean;
+  } | null;
+};
+
+const DEBUG_HISTORY_LIMIT = 30;
+
 type WsClientDeps = {
   getConfig: () => Record<string, any>;
+  isDebugEnabled?: () => boolean;
   onSnapshotChanged: (snapshot: Snapshot) => void;
   onAckMessage: (payload: Record<string, any>) => void;
   onWsStatusChanged: (payload: {
@@ -40,7 +75,7 @@ export function createEmptyAdminSnapshot() {
 }
 
 export function createAdminWsClient(deps: WsClientDeps) {
-  const messageCodec = new MsgpackNetworkMessageCodec();
+  const messageCodec = new ProtobufNetworkMessageCodec();
   let adminWs: WebSocket | null = null;
   let wsConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +88,82 @@ export function createAdminWsClient(deps: WsClientDeps) {
   let lastAdminMessageAt = 0;
   let serverProtocolVersion: string | null = null;
   let latestSnapshot: Snapshot = createEmptyAdminSnapshot();
+  let debugState: WsDebugState = {
+    history: [],
+    lastInbound: null,
+    lastHandshakeAck: null,
+    lastSnapshotFull: null,
+    lastPatch: null,
+    lastAdminAck: null,
+    lastResyncRequest: null,
+  };
+
+  function isDebugEnabled() {
+    return Boolean(deps.isDebugEnabled?.());
+  }
+
+  function getScopeCount(value: unknown) {
+    if (!value || typeof value !== 'object') return 0;
+    const record = value as Record<string, unknown>;
+    if (record.upsert || record.delete) {
+      const upsertCount = record.upsert && typeof record.upsert === 'object'
+        ? Object.keys(record.upsert as Record<string, unknown>).length
+        : 0;
+      const deleteCount = Array.isArray(record.delete) ? record.delete.length : 0;
+      return upsertCount + deleteCount;
+    }
+    return Object.keys(record).length;
+  }
+
+  function getCountsFromPayload(payload: Record<string, unknown> | null | undefined): ScopeDebugCounts {
+    const tabState = payload?.tabState;
+    const reports = tabState && typeof tabState === 'object'
+      ? (tabState as Record<string, unknown>).reports
+      : null;
+    return {
+      players: getScopeCount(payload?.players),
+      entities: getScopeCount(payload?.entities),
+      waypoints: getScopeCount(payload?.waypoints),
+      battleChunks: getScopeCount(payload?.battleChunks),
+      playerMarks: getScopeCount(payload?.playerMarks),
+      tabReports: getScopeCount(reports),
+      connections: Array.isArray(payload?.connections) ? payload.connections.length : 0,
+    };
+  }
+
+  function cloneForDebug<T>(value: T): T {
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch (_) {
+      return value;
+    }
+  }
+
+  function recordInboundMessage(payload: AdminInboundPacket) {
+    if (!isDebugEnabled()) {
+      return;
+    }
+    const payloadRecord = payload && typeof payload === 'object'
+      ? cloneForDebug(payload as Record<string, unknown>)
+      : null;
+    const record: WsDebugMessageRecord = {
+      receivedAt: Date.now(),
+      type: payload?.type ? String(payload.type) : 'unknown',
+      channel: 'admin',
+      counts: getCountsFromPayload(payloadRecord),
+      payload: payloadRecord,
+    };
+
+    debugState = {
+      ...debugState,
+      history: [record, ...debugState.history].slice(0, DEBUG_HISTORY_LIMIT),
+      lastInbound: record,
+      lastHandshakeAck: record.type === 'handshake_ack' ? record : debugState.lastHandshakeAck,
+      lastSnapshotFull: record.type === 'snapshot_full' ? record : debugState.lastSnapshotFull,
+      lastPatch: record.type === 'patch' ? record : debugState.lastPatch,
+      lastAdminAck: record.type === 'admin_ack' ? record : debugState.lastAdminAck,
+    };
+  }
 
   function emitStatus() {
     deps.onWsStatusChanged({
@@ -75,17 +186,41 @@ export function createAdminWsClient(deps: WsClientDeps) {
   }
 
   function requestResync(reason = 'baseline_missing') {
+    const textReason = String(reason || 'baseline_missing').trim() || 'baseline_missing';
     if (!adminWs || adminWs.readyState !== WebSocket.OPEN) {
-      return;
+      if (isDebugEnabled()) {
+        debugState = {
+          ...debugState,
+          lastResyncRequest: {
+            requestedAt: Date.now(),
+            reason: textReason,
+            sent: false,
+          },
+        };
+      }
+      return false;
     }
     const now = Date.now();
     if (now - lastAdminResyncRequestAt < 1500) {
-      return;
+      return false;
     }
     lastAdminResyncRequestAt = now;
+    if (isDebugEnabled()) {
+      debugState = {
+        ...debugState,
+        lastResyncRequest: {
+          requestedAt: now,
+          reason: textReason,
+          sent: true,
+        },
+      };
+    }
     try {
-      adminWs.send(messageCodec.encode(buildAdminResyncRequest(reason)));
-    } catch (_) {}
+      adminWs.send(messageCodec.encode(buildAdminResyncRequest(textReason)));
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function applyAdminDeltaMessage(message: AdminInboundPacket) {
@@ -337,6 +472,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
         if (!payload) {
           return;
         }
+        recordInboundMessage(payload);
         lastAdminMessageType = payload?.type ? String(payload.type) : 'unknown';
         lastAdminMessageAt = Date.now();
 
@@ -435,6 +571,33 @@ export function createAdminWsClient(deps: WsClientDeps) {
     };
   }
 
+  function getDebugState() {
+    if (!isDebugEnabled()) {
+      return {
+        history: [],
+        lastInbound: null,
+        lastHandshakeAck: null,
+        lastSnapshotFull: null,
+        lastPatch: null,
+        lastAdminAck: null,
+        lastResyncRequest: null,
+      };
+    }
+    return cloneForDebug(debugState);
+  }
+
+  function clearDebugHistory() {
+    debugState = {
+      history: [],
+      lastInbound: null,
+      lastHandshakeAck: null,
+      lastSnapshotFull: null,
+      lastPatch: null,
+      lastAdminAck: null,
+      lastResyncRequest: null,
+    };
+  }
+
   return {
     connect,
     reconnect,
@@ -444,5 +607,7 @@ export function createAdminWsClient(deps: WsClientDeps) {
     isWsOpen,
     getSnapshot,
     getStatus,
+    getDebugState,
+    clearDebugHistory,
   };
 }
