@@ -6,6 +6,7 @@ import {
   applyScopePatchMap,
   shouldResyncForScopeMissingBaseline,
 } from '../utils/overlayUtils';
+import { normalizeDebugJsonValue } from '../utils/debugJson';
 import {
   WebMapSnapshot,
   buildWebMapHandshake,
@@ -133,7 +134,10 @@ export function createWebMapWsClient(deps: WsClientDeps) {
 
   function cloneForDebug<T>(value: T): T {
     try {
-      return JSON.parse(JSON.stringify(value)) as T;
+      return normalizeDebugJsonValue(value, {
+        omitUndefined: false,
+        includeTypeName: true,
+      }) as T;
     } catch (_) {
       return value;
     }

@@ -25,6 +25,7 @@ import {
   sanitizeConfig,
   getPlayerDataNode,
 } from './utils/overlayUtils';
+import { normalizeDebugJsonValue, stringifyDebugJson } from './utils/debugJson';
 import { createAutoMarkSyncManager } from './core/autoMarkSync';
 import {
   buildCommandPlayerMarkClear,
@@ -772,10 +773,10 @@ declare const unsafeWindow: Window | undefined;
         battleChunksOnMap: Number(mapDebug.battleChunks || 0),
       },
       json: {
-        lastInboundMessage: wsDebug?.lastInbound?.payload ?? null,
-        lastSnapshotFull: wsDebug?.lastSnapshotFull?.payload ?? null,
-        lastPatch: wsDebug?.lastPatch?.payload ?? null,
-        latestSnapshot: snapshot,
+        lastInboundMessage: normalizeDebugJsonValue(wsDebug?.lastInbound?.payload ?? null),
+        lastSnapshotFull: normalizeDebugJsonValue(wsDebug?.lastSnapshotFull?.payload ?? null),
+        lastPatch: normalizeDebugJsonValue(wsDebug?.lastPatch?.payload ?? null),
+        latestSnapshot: normalizeDebugJsonValue(snapshot),
       },
       dimensionFilter: {
         targetDimension: dimensionStats.targetDimension || CONFIG.TARGET_DIMENSION,
@@ -796,14 +797,6 @@ declare const unsafeWindow: Window | undefined;
         : [],
       lastResyncRequest: wsDebug?.lastResyncRequest || null,
     };
-  }
-
-  function stringifyDebugJson(value: unknown) {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch (_) {
-      return String(value);
-    }
   }
 
   async function copyText(text: string) {
@@ -1077,11 +1070,13 @@ declare const unsafeWindow: Window | undefined;
         const commands = {
           help: '显示可用命令',
           summary: '查看连接状态/对象数量/最近消息',
-          snapshot: '输出最新内存快照',
+          snapshot: '输出精简版最新内存快照',
+          snapshotVerbose: '输出详细版最新内存快照（保留 $typeName）',
           playerTab: '按玩家ID查看 tab 匹配与城镇解析结果',
           markers: '输出当前地图 marker 统计',
           ws: '输出 websocket 状态',
-          last: '输出最近一条 ws 消息元信息',
+          last: '输出精简版最近一条 ws 消息',
+          lastVerbose: '输出详细版最近一条 ws 消息（保留 $typeName）',
           resync: '手动发送 resync_req 请求全量',
           ping: '手动发送 ping',
         };
@@ -1107,6 +1102,15 @@ declare const unsafeWindow: Window | undefined;
           return null;
         }
         return buildOverlayDebugState().json.latestSnapshot;
+      },
+      snapshotVerbose() {
+        if (!isDebugPanelEnabled()) {
+          return null;
+        }
+        return normalizeDebugJsonValue(latestSnapshot, {
+          omitUndefined: false,
+          includeTypeName: true,
+        });
       },
       playerTab(playerId) {
         const normalizedId = String(playerId || '').trim();
@@ -1141,6 +1145,15 @@ declare const unsafeWindow: Window | undefined;
           return null;
         }
         return buildOverlayDebugState().json.lastInboundMessage;
+      },
+      lastVerbose() {
+        if (!isDebugPanelEnabled()) {
+          return null;
+        }
+        return normalizeDebugJsonValue(wsClient?.getDebugState?.()?.lastInbound?.payload ?? null, {
+          omitUndefined: false,
+          includeTypeName: true,
+        });
       },
       resync(reason = 'manual_console_debug') {
         const requested = wsClient?.requestResync?.(reason);

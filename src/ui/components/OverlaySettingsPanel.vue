@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { stringifyDebugJson } from '../../utils/debugJson';
 
 type PlayerOption = {
   playerId: string;
@@ -340,13 +341,7 @@ function formatTimestamp(value: number | null | undefined) {
 }
 
 function formatJson(value: unknown) {
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch (_) {
-    return String(value);
-  }
+  return stringifyDebugJson(value);
 }
 
 function formatDimensionBucket(item: {
