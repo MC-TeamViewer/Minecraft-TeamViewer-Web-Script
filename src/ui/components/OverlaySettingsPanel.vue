@@ -250,7 +250,6 @@ function onPlayerSelectionChanged() {
 
 function onOverviewDimensionChanged() {
   const next = String(props.state.overview.targetDimension || 'minecraft:overworld').trim() || 'minecraft:overworld';
-  props.state.form.TARGET_DIMENSION = next;
   props.actions.onOverviewDimensionChanged(next);
 }
 

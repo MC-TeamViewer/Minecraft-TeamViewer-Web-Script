@@ -769,7 +769,6 @@ export function createSettingsUi(deps: SettingsUiDeps) {
 
   function setTargetDimension(dimension: string) {
     const next = String(dimension || 'minecraft:overworld').trim() || 'minecraft:overworld';
-    state.form.TARGET_DIMENSION = next;
     state.overview.targetDimension = next;
   }
 

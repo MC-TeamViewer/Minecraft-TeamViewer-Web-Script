@@ -1052,7 +1052,6 @@ declare const unsafeWindow: Window | undefined;
       const nextDimension = normalizeDimension(dimension) || DEFAULT_CONFIG.TARGET_DIMENSION;
       CONFIG.TARGET_DIMENSION = nextDimension;
       settingsUi.setTargetDimension(nextDimension);
-      saveConfigToStorage();
       mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
       refreshPlayerLists();
       lastErrorText = null;
