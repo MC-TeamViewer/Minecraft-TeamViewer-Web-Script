@@ -1,6 +1,5 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import type { WebMapInboundPacket, WebMapOutboundPacket } from './networkSchemas';
-import { parseWebMapInboundPacket } from './networkSchemas';
 import {
   CommandPlayerMarkClearAllSchema,
   CommandPlayerMarkClearSchema,
@@ -125,11 +124,11 @@ function decodeWebMapAck(message: any): WebMapInboundPacket | null {
     payload.waypointIds = Array.isArray(detail.value?.waypointIds) ? detail.value.waypointIds : [];
   }
 
-  return parseWebMapInboundPacket(payload);
+  return payload as WebMapInboundPacket;
 }
 
 function decodeSnapshotFull(message: any): WebMapInboundPacket | null {
-  return parseWebMapInboundPacket({
+  return {
     type: 'snapshot_full',
     players: message.players ?? {},
     entities: message.entities ?? {},
@@ -141,7 +140,7 @@ function decodeSnapshotFull(message: any): WebMapInboundPacket | null {
     connections: Array.isArray(message.connections) ? message.connections : [],
     connections_count: message.connectionsCount ?? undefined,
     server_time: message.serverTime ?? undefined,
-  });
+  };
 }
 
 function decodePatch(message: any): WebMapInboundPacket | null {
@@ -162,7 +161,7 @@ function decodePatch(message: any): WebMapInboundPacket | null {
     meta.connections_count = message.connectionsCount;
   }
 
-  return parseWebMapInboundPacket({
+  return {
     type: 'patch',
     players: toScopePatch(message.players),
     entities: toScopePatch(message.entities),
@@ -171,7 +170,17 @@ function decodePatch(message: any): WebMapInboundPacket | null {
     playerMarks: toScopePatch(message.playerMarks),
     meta: Object.keys(meta).length ? meta : undefined,
     server_time: message.serverTime ?? undefined,
-  });
+  };
+}
+
+function encodeEnvelope(caseName: string, value: unknown): ArrayBuffer {
+  return toBinary(WireEnvelopeSchema, create(WireEnvelopeSchema, {
+    channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
+    payload: {
+      case: caseName as any,
+      value,
+    },
+  })).buffer as ArrayBuffer;
 }
 
 export interface NetworkMessageCodec {
@@ -183,148 +192,92 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
   encode(packet: WebMapOutboundPacket): ArrayBuffer {
     switch (packet.type) {
       case 'handshake': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapHandshakeRequest',
-            value: create(WebMapHandshakeRequestSchema, {
-              networkProtocolVersion: packet.networkProtocolVersion,
-              minimumCompatibleNetworkProtocolVersion: packet.minimumCompatibleNetworkProtocolVersion,
-              localProgramVersion: packet.localProgramVersion,
+        return encodeEnvelope('webMapHandshakeRequest', create(WebMapHandshakeRequestSchema, {
+          networkProtocolVersion: packet.networkProtocolVersion,
+          minimumCompatibleNetworkProtocolVersion: packet.minimumCompatibleNetworkProtocolVersion,
+          localProgramVersion: packet.localProgramVersion,
+          roomCode: packet.roomCode,
+        }));
+      }
+      case 'resync_req': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'resyncRequest',
+            value: create(ResyncRequestSchema, {
+              reason: packet.reason,
+            }),
+          },
+        }));
+      }
+      case 'command_player_mark_set': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'setPlayerMark',
+            value: create(CommandPlayerMarkSetSchema, {
+              playerId: packet.playerId,
+              team: packet.team,
+              color: packet.color,
+              label: packet.label,
+              source: packet.source,
+            }),
+          },
+        }));
+      }
+      case 'command_player_mark_clear': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'clearPlayerMark',
+            value: create(CommandPlayerMarkClearSchema, {
+              playerId: packet.playerId,
+            }),
+          },
+        }));
+      }
+      case 'command_player_mark_clear_all': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'clearAllPlayerMarks',
+            value: create(CommandPlayerMarkClearAllSchema, {}),
+          },
+        }));
+      }
+      case 'command_same_server_filter_set': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'setSameServerFilter',
+            value: create(CommandSameServerFilterSetSchema, {
+              enabled: Boolean(packet.enabled),
+            }),
+          },
+        }));
+      }
+      case 'command_tactical_waypoint_set': {
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'setTacticalWaypoint',
+            value: create(CommandTacticalWaypointSetSchema, {
+              x: packet.x,
+              z: packet.z,
+              label: packet.label,
+              dimension: packet.dimension,
+              tacticalType: packet.tacticalType,
+              permanent: packet.permanent,
+              ttlSeconds: packet.ttlSeconds,
+              color: packet.color,
               roomCode: packet.roomCode,
             }),
           },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'resync_req': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'resyncRequest',
-                value: create(ResyncRequestSchema, {
-                  reason: packet.reason,
-                }),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'command_player_mark_set': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'setPlayerMark',
-                value: create(CommandPlayerMarkSetSchema, {
-                  playerId: packet.playerId,
-                  team: packet.team,
-                  color: packet.color,
-                  label: packet.label,
-                  source: packet.source,
-                }),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'command_player_mark_clear': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'clearPlayerMark',
-                value: create(CommandPlayerMarkClearSchema, {
-                  playerId: packet.playerId,
-                }),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'command_player_mark_clear_all': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'clearAllPlayerMarks',
-                value: create(CommandPlayerMarkClearAllSchema, {}),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'command_same_server_filter_set': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'setSameServerFilter',
-                value: create(CommandSameServerFilterSetSchema, {
-                  enabled: Boolean(packet.enabled),
-                }),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
-      }
-      case 'command_tactical_waypoint_set': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'setTacticalWaypoint',
-                value: create(CommandTacticalWaypointSetSchema, {
-                  x: packet.x,
-                  z: packet.z,
-                  label: packet.label,
-                  dimension: packet.dimension,
-                  tacticalType: packet.tacticalType,
-                  permanent: packet.permanent,
-                  ttlSeconds: packet.ttlSeconds,
-                  color: packet.color,
-                  roomCode: packet.roomCode,
-                }),
-              },
-            }),
-          },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+        }));
       }
       case 'waypoints_delete': {
-        const envelope = create(WireEnvelopeSchema, {
-          channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-          payload: {
-            case: 'webMapCommand',
-            value: create(WebMapCommandSchema, {
-              command: {
-                case: 'deleteWaypoints',
-                value: create(WaypointsDeleteSchema, {
-                  waypointIds: packet.waypointIds,
-                }),
-              },
+        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
+          command: {
+            case: 'deleteWaypoints',
+            value: create(WaypointsDeleteSchema, {
+              waypointIds: packet.waypointIds,
             }),
           },
-        });
-        return toBinary(WireEnvelopeSchema, envelope).buffer as ArrayBuffer;
+        }));
       }
       default:
         throw new Error(`Unsupported web-map outbound packet: ${(packet as { type?: string }).type || 'unknown'}`);
@@ -349,7 +302,7 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
       case 'webMapAck':
         return decodeWebMapAck(envelope.payload.value);
       case 'handshakeAck':
-        return parseWebMapInboundPacket({
+        return {
           type: 'handshake_ack',
           ready: envelope.payload.value.ready,
           networkProtocolVersion: envelope.payload.value.networkProtocolVersion,
@@ -364,12 +317,12 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
           playerTimeoutSec: envelope.payload.value.playerTimeoutSec,
           entityTimeoutSec: envelope.payload.value.entityTimeoutSec,
           battleChunkTimeoutSec: envelope.payload.value.battleChunkTimeoutSec,
-        });
+        } as WebMapInboundPacket;
       case 'pong':
-        return parseWebMapInboundPacket({
+        return {
           type: 'pong',
           serverTime: envelope.payload.value.serverTime,
-        });
+        } as WebMapInboundPacket;
       case 'snapshotFull':
         return decodeSnapshotFull(envelope.payload.value);
       case 'patch':
