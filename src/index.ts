@@ -588,6 +588,7 @@ declare const unsafeWindow: Window | undefined;
     maybeSyncAutoDetectedMarks: autoMarkSync.maybeSyncAutoDetectedMarks,
     getLatestPlayerMarks: () => latestPlayerMarks,
     getWsConnected: () => wsConnected,
+    isDebugEnabled: () => isDebugPanelEnabled(),
     onCreateTacticalWaypoint: (payload) => {
       const ok = sendWebMapCommand(buildCommandTacticalWaypointSet({
         x: payload.x,

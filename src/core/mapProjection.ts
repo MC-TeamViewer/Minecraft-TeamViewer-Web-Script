@@ -33,6 +33,7 @@ type MapProjectionDeps = {
   onDeleteTacticalWaypoint?: (payload: {
     waypointId: string;
   }) => boolean;
+  isDebugEnabled?: () => boolean;
   onDebugStateChanged?: () => void;
 };
 
@@ -67,7 +68,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
 
+  function isDebugEnabled() {
+    return typeof deps.isDebugEnabled === 'function' ? Boolean(deps.isDebugEnabled()) : true;
+  }
+
   function emitDebugStateChanged() {
+    if (!isDebugEnabled()) {
+      return;
+    }
     try {
       deps.onDebugStateChanged?.();
     } catch (_) {}
@@ -1759,6 +1767,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
     }
   }
 
+  function clearBattleChunkLayers() {
+    for (const layer of battleChunkLayersById.values()) {
+      try { layer.remove(); } catch (_) {}
+    }
+    battleChunkLayersById.clear();
+    battleChunkRenderMemoById.clear();
+  }
+
   function findTrackedPositionFromEntities(snapshot: any, targetEntityId: string, wantedDim: string) {
     const entities = snapshot && typeof snapshot === 'object' ? snapshot.entities : null;
     if (!entities || typeof entities !== 'object') return null;
@@ -2278,6 +2294,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
   }
 
   function applyDirtyBattleChunks(map: any, snapshot: any, wantedDim: string, changeSet: SnapshotChangeSet) {
+    if (!Boolean(CONFIG.SHOW_BATTLE_CHUNK_LAYER)) {
+      clearBattleChunkLayers();
+      return;
+    }
     const battleChunks = snapshot && typeof snapshot === 'object' ? snapshot.battleChunks : null;
     for (const chunkId of changeSet.deleteIds.battleChunks) {
       removeBattleChunkById(String(chunkId));
@@ -2474,11 +2494,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     waypointsById.clear();
     waypointRenderMemoById.clear();
 
-    for (const layer of battleChunkLayersById.values()) {
-      try { layer.remove(); } catch (_) {}
-    }
-    battleChunkLayersById.clear();
-    battleChunkRenderMemoById.clear();
+    clearBattleChunkLayers();
 
     for (const layer of reporterEffectLayersByStyle.values()) {
       try { layer.remove(); } catch (_) {}
