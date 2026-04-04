@@ -5,6 +5,8 @@ export const USERSCRIPT_META = {
   description: '将 TeamViewRelay 的远程玩家与战局区块信息投影到 squaremap 地图',
   author: 'Prof. Chen',
   license: 'MIT',
+  homepageURL: 'https://github.com/MC-TeamViewer/Minecraft-TeamViewer-Web-Script',
+  homepage: 'https://github.com/MC-TeamViewer/Minecraft-TeamViewer-Web-Script',
   match: [
     'https://map.nodemc.cc/*',
     'http://map.nodemc.cc/*',
