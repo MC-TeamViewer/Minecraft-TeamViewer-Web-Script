@@ -83,3 +83,10 @@ pnpm build
 ```
 
 打包产物在 `dist/*.user.js`，将该文件导入 Tampermonkey 即可。
+
+## 安装方式
+首先安装 Tampermonkey 浏览器插件
+
+然后从Release页面下载对应版本，并导入安装脚本
+
+或访问 https://greasyfork.org/zh-CN/scripts/571542-teamviewrelay-%E5%9C%B0%E5%9B%BE%E6%8A%95%E5%BD%B1-squaremap%E7%89%88 安装脚本
