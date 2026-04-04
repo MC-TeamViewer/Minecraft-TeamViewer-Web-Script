@@ -17,6 +17,30 @@ import { ProtobufNetworkMessageCodec } from './messageCodec';
 
 type Snapshot = WebMapSnapshot & Record<string, any>;
 
+export type SnapshotScopeName =
+  | 'players'
+  | 'entities'
+  | 'waypoints'
+  | 'battleChunks'
+  | 'playerMarks'
+  | 'tabState'
+  | 'connections';
+
+export type SnapshotScopeFlags = Record<SnapshotScopeName, boolean>;
+export type SnapshotScopeIdBuckets = Record<SnapshotScopeName, string[]>;
+
+export type SnapshotChangeSet = {
+  kind: 'full' | 'patch';
+  dirtyScopes: SnapshotScopeFlags;
+  upsertIds: SnapshotScopeIdBuckets;
+  deleteIds: SnapshotScopeIdBuckets;
+  hasWorldRenderImpact: boolean;
+  perf: {
+    decodeMs: number;
+    mergeMs: number;
+  };
+};
+
 type ScopeDebugCounts = {
   players: number;
   entities: number;
@@ -35,6 +59,22 @@ type WsDebugMessageRecord = {
   payload: Record<string, unknown> | null;
 };
 
+type WsDebugCloseEvent = {
+  closedAt: number;
+  code: number;
+  reason: string;
+  wasClean: boolean;
+  manual: boolean;
+  pageUnloading: boolean;
+};
+
+type WsDebugRuntimeError = {
+  at: number;
+  stage: string;
+  message: string;
+  stack: string | null;
+};
+
 type WsDebugState = {
   history: WsDebugMessageRecord[];
   lastInbound: WsDebugMessageRecord | null;
@@ -47,6 +87,12 @@ type WsDebugState = {
     reason: string;
     sent: boolean;
   } | null;
+  lastCloseEvent: WsDebugCloseEvent | null;
+  lastRuntimeError: WsDebugRuntimeError | null;
+  lastPerf: {
+    decodeMs: number;
+    mergeMs: number;
+  } | null;
 };
 
 const DEBUG_HISTORY_LIMIT = 30;
@@ -54,7 +100,7 @@ const DEBUG_HISTORY_LIMIT = 30;
 type WsClientDeps = {
   getConfig: () => Record<string, any>;
   isDebugEnabled?: () => boolean;
-  onSnapshotChanged: (snapshot: Snapshot) => void;
+  onSnapshotChanged: (snapshot: Snapshot, changeSet: SnapshotChangeSet) => void;
   onAckMessage: (payload: Record<string, any>) => void;
   onWsStatusChanged: (payload: {
     wsConnected: boolean;
@@ -81,6 +127,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
   let wsConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let manualWsClose = false;
+  let pageUnloading = false;
   let reconnectSuppressedByVersionIncompatibility = false;
 
   let lastErrorText: string | null = null;
@@ -97,10 +144,165 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     lastPatch: null,
     lastWebMapAck: null,
     lastResyncRequest: null,
+    lastCloseEvent: null,
+    lastRuntimeError: null,
+    lastPerf: null,
   };
 
   function isDebugEnabled() {
     return Boolean(deps.isDebugEnabled?.());
+  }
+
+  function createEmptyScopeFlags(): SnapshotScopeFlags {
+    return {
+      players: false,
+      entities: false,
+      waypoints: false,
+      battleChunks: false,
+      playerMarks: false,
+      tabState: false,
+      connections: false,
+    };
+  }
+
+  function createEmptyScopeIdBuckets(): SnapshotScopeIdBuckets {
+    return {
+      players: [],
+      entities: [],
+      waypoints: [],
+      battleChunks: [],
+      playerMarks: [],
+      tabState: [],
+      connections: [],
+    };
+  }
+
+  function hasObjectKeys(value: unknown) {
+    return Boolean(value) && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0;
+  }
+
+  function getScopePatchIds(scopePatch: unknown) {
+    const patchRecord = scopePatch && typeof scopePatch === 'object'
+      ? scopePatch as Record<string, unknown>
+      : null;
+    const upsertIds = patchRecord?.upsert && typeof patchRecord.upsert === 'object'
+      ? Object.keys(patchRecord.upsert as Record<string, unknown>)
+      : [];
+    const deleteIds = Array.isArray(patchRecord?.delete)
+      ? patchRecord!.delete.map((item) => String(item || '')).filter(Boolean)
+      : [];
+    return { upsertIds, deleteIds };
+  }
+
+  function buildFullSnapshotChangeSet(snapshot: Snapshot, decodeMs: number): SnapshotChangeSet {
+    const dirtyScopes = createEmptyScopeFlags();
+    const upsertIds = createEmptyScopeIdBuckets();
+    const deleteIds = createEmptyScopeIdBuckets();
+
+    const scopedMaps: Array<Exclude<SnapshotScopeName, 'tabState' | 'connections'>> = [
+      'players',
+      'entities',
+      'waypoints',
+      'battleChunks',
+      'playerMarks',
+    ];
+
+    for (const scopeName of scopedMaps) {
+      const record = snapshot?.[scopeName];
+      if (!record || typeof record !== 'object') continue;
+      upsertIds[scopeName] = Object.keys(record);
+      dirtyScopes[scopeName] = true;
+    }
+
+    dirtyScopes.tabState = true;
+    dirtyScopes.connections = true;
+    upsertIds.tabState = snapshot?.tabState?.reports && typeof snapshot.tabState.reports === 'object'
+      ? Object.keys(snapshot.tabState.reports)
+      : [];
+    upsertIds.connections = Array.isArray(snapshot?.connections)
+      ? snapshot.connections.map((item) => String(item || '')).filter(Boolean)
+      : [];
+
+    return {
+      kind: 'full',
+      dirtyScopes,
+      upsertIds,
+      deleteIds,
+      hasWorldRenderImpact: true,
+      perf: {
+        decodeMs,
+        mergeMs: 0,
+      },
+    };
+  }
+
+  function buildPatchChangeSet(message: WebMapInboundPacket, decodeMs: number, mergeMs: number): SnapshotChangeSet {
+    const dirtyScopes = createEmptyScopeFlags();
+    const upsertIds = createEmptyScopeIdBuckets();
+    const deleteIds = createEmptyScopeIdBuckets();
+
+    const scopedMaps: Array<Exclude<SnapshotScopeName, 'tabState' | 'connections'>> = [
+      'players',
+      'entities',
+      'waypoints',
+      'battleChunks',
+      'playerMarks',
+    ];
+
+    for (const scopeName of scopedMaps) {
+      const scopePatch = (message as Record<string, unknown>)[scopeName];
+      const ids = getScopePatchIds(scopePatch);
+      upsertIds[scopeName] = ids.upsertIds;
+      deleteIds[scopeName] = ids.deleteIds;
+      dirtyScopes[scopeName] = ids.upsertIds.length > 0 || ids.deleteIds.length > 0;
+    }
+
+    const meta = message.type === 'patch' && message.meta && typeof message.meta === 'object'
+      ? message.meta as Record<string, unknown>
+      : null;
+    const metaTabState = meta?.tabState;
+    const metaTabStatePatch = meta?.tabStatePatch;
+    const metaConnections = meta?.connections;
+
+    if (metaTabState && typeof metaTabState === 'object') {
+      dirtyScopes.tabState = true;
+      upsertIds.tabState = ['tabState'];
+    }
+
+    if (metaTabStatePatch && typeof metaTabStatePatch === 'object') {
+      dirtyScopes.tabState = true;
+      const reportsPatch = metaTabStatePatch as Record<string, unknown>;
+      upsertIds.tabState = reportsPatch.upsertReports && typeof reportsPatch.upsertReports === 'object'
+        ? Object.keys(reportsPatch.upsertReports as Record<string, unknown>)
+        : upsertIds.tabState;
+      deleteIds.tabState = Array.isArray(reportsPatch.deleteReports)
+        ? reportsPatch.deleteReports.map((item) => String(item || '')).filter(Boolean)
+        : [];
+    }
+
+    if (Array.isArray(metaConnections)) {
+      dirtyScopes.connections = true;
+      upsertIds.connections = metaConnections.map((item) => String(item || '')).filter(Boolean);
+    }
+
+    return {
+      kind: 'patch',
+      dirtyScopes,
+      upsertIds,
+      deleteIds,
+      hasWorldRenderImpact:
+        dirtyScopes.players ||
+        dirtyScopes.entities ||
+        dirtyScopes.waypoints ||
+        dirtyScopes.battleChunks ||
+        dirtyScopes.playerMarks ||
+        dirtyScopes.tabState ||
+        dirtyScopes.connections,
+      perf: {
+        decodeMs,
+        mergeMs,
+      },
+    };
   }
 
   function getScopeCount(value: unknown) {
@@ -169,6 +371,50 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     };
   }
 
+  function getErrorMessage(error: unknown) {
+    if (error instanceof Error) {
+      return error.message || String(error);
+    }
+    return String(error ?? 'unknown_error');
+  }
+
+  function recordRuntimeError(stage: string, error: unknown) {
+    const message = getErrorMessage(error);
+    const stack = error instanceof Error && typeof error.stack === 'string'
+      ? error.stack
+      : null;
+    console.error(`[TeamViewRelay Overlay] web-map ${stage} failed`, error);
+    if (isDebugEnabled()) {
+      debugState = {
+        ...debugState,
+        lastRuntimeError: {
+          at: Date.now(),
+          stage,
+          message,
+          stack,
+        },
+      };
+    }
+    lastErrorText = message;
+  }
+
+  function recordCloseEvent(event: CloseEvent) {
+    if (!isDebugEnabled()) {
+      return;
+    }
+    debugState = {
+      ...debugState,
+      lastCloseEvent: {
+        closedAt: Date.now(),
+        code: Number(event?.code || 0),
+        reason: String(event?.reason || ''),
+        wasClean: Boolean(event?.wasClean),
+        manual: manualWsClose,
+        pageUnloading,
+      },
+    };
+  }
+
   function emitStatus() {
     deps.onWsStatusChanged({
       wsConnected,
@@ -180,7 +426,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
   }
 
   function scheduleReconnect() {
-    if (reconnectSuppressedByVersionIncompatibility) return;
+    if (pageUnloading || reconnectSuppressedByVersionIncompatibility) return;
     if (reconnectTimer !== null) return;
     const config = deps.getConfig();
     reconnectTimer = setTimeout(() => {
@@ -222,14 +468,16 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     try {
       webMapWs.send(messageCodec.encode(buildWebMapResyncRequest(textReason)));
       return true;
-    } catch (_) {
+    } catch (error) {
+      recordRuntimeError('send_resync_request', error);
+      emitStatus();
       return false;
     }
   }
 
-  function applyWebMapDeltaMessage(message: WebMapInboundPacket) {
+  function applyWebMapDeltaMessage(message: WebMapInboundPacket, decodeMs = 0) {
     if (!message || typeof message !== 'object') {
-      return;
+      return null;
     }
 
     if (message.type === 'snapshot_full') {
@@ -244,17 +492,16 @@ export function createWebMapWsClient(deps: WsClientDeps) {
         connections_count: Number.isFinite(message.connections_count) ? message.connections_count : 0,
         server_time: message.server_time,
       };
-      deps.onSnapshotChanged(latestSnapshot);
-      return;
+      return buildFullSnapshotChangeSet(latestSnapshot, decodeMs);
     }
 
     if (message.type !== 'patch') {
-      return;
+      return null;
     }
 
     if (!latestSnapshot || typeof latestSnapshot !== 'object') {
       requestResync('patch_before_full_snapshot');
-      return;
+      return null;
     }
 
     const needResync =
@@ -265,6 +512,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       requestResync('patch_missing_baseline');
     }
 
+    const mergeStartAt = performance.now();
     latestSnapshot.players = applyScopePatchMap(latestSnapshot.players, message.players, ['x', 'y', 'z', 'dimension']);
     latestSnapshot.entities = applyScopePatchMap(latestSnapshot.entities, message.entities, ['x', 'y', 'z', 'dimension']);
     latestSnapshot.waypoints = applyScopePatchMap(latestSnapshot.waypoints, message.waypoints);
@@ -297,7 +545,8 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       latestSnapshot.server_time = message.server_time;
     }
 
-    deps.onSnapshotChanged(latestSnapshot);
+    const mergeMs = Math.max(0, performance.now() - mergeStartAt);
+    return buildPatchChangeSet(message, decodeMs, mergeMs);
   }
 
   function applyTabStatePatch(
@@ -339,13 +588,16 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       webMapWs.send(messageCodec.encode(message));
       return true;
     } catch (error: any) {
-      lastErrorText = String(error?.message || error);
+      recordRuntimeError('send_command', error);
       emitStatus();
       return false;
     }
   }
 
-  function cleanup() {
+  function cleanup(options: { manualClose?: boolean } = {}) {
+    if (options.manualClose) {
+      manualWsClose = true;
+    }
     if (webMapWs) {
       webMapWs.onopen = null;
       webMapWs.onmessage = null;
@@ -363,9 +615,14 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     }
   }
 
+  function prepareForPageUnload() {
+    pageUnloading = true;
+    cleanup({ manualClose: true });
+  }
+
   function reconnect() {
-    manualWsClose = true;
-    cleanup();
+    pageUnloading = false;
+    cleanup({ manualClose: true });
     manualWsClose = false;
     reconnectSuppressedByVersionIncompatibility = false;
     lastErrorText = null;
@@ -426,10 +683,15 @@ export function createWebMapWsClient(deps: WsClientDeps) {
   }
 
   function connect() {
+    if (pageUnloading) {
+      return;
+    }
     if (webMapWs && (webMapWs.readyState === WebSocket.OPEN || webMapWs.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
+    manualWsClose = false;
+    pageUnloading = false;
     reconnectSuppressedByVersionIncompatibility = false;
     serverProtocolVersion = null;
 
@@ -439,8 +701,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     try {
       ws = new WebSocket(config.ADMIN_WS_URL);
     } catch (error: any) {
-      const text = String(error?.message || error);
-      lastErrorText = text;
+      recordRuntimeError('create_socket', error);
       emitStatus();
       scheduleReconnect();
       return;
@@ -454,12 +715,13 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       try {
         ws.send(messageCodec.encode(buildWebMapHandshake(config.ROOM_CODE)));
       } catch (error: any) {
-        lastErrorText = String(error?.message || error);
+        recordRuntimeError('send_handshake', error);
       }
       emitStatus();
     };
 
     ws.onmessage = async (event) => {
+      let currentStage = 'read_message';
       try {
         const data = event?.data;
         let rawPayload: ArrayBuffer | Uint8Array | string | null = null;
@@ -472,8 +734,13 @@ export function createWebMapWsClient(deps: WsClientDeps) {
         }
         if (rawPayload == null) return;
 
+        const decodeStartedAt = performance.now();
+        currentStage = 'decode_message';
         const payload = messageCodec.decode(rawPayload);
+        const decodeMs = Math.max(0, performance.now() - decodeStartedAt);
         if (!payload) {
+          recordRuntimeError(currentStage, new Error('unsupported_or_undecodable_websocket_payload'));
+          emitStatus();
           return;
         }
         recordInboundMessage(payload);
@@ -526,19 +793,43 @@ export function createWebMapWsClient(deps: WsClientDeps) {
           return;
         }
 
-        applyWebMapDeltaMessage(payload);
+        currentStage = `apply_${String(payload?.type || 'message')}`;
+        const changeSet = applyWebMapDeltaMessage(payload, decodeMs);
+        if (changeSet) {
+          if (isDebugEnabled()) {
+            debugState = {
+              ...debugState,
+              lastPerf: {
+                decodeMs: changeSet.perf.decodeMs,
+                mergeMs: changeSet.perf.mergeMs,
+              },
+            };
+          }
+          deps.onSnapshotChanged(latestSnapshot, changeSet);
+        }
         lastErrorText = null;
         emitStatus();
       } catch (error: any) {
-        lastErrorText = String(error?.message || error);
+        recordRuntimeError(currentStage, error);
         emitStatus();
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
       wsConnected = false;
       if (!lastErrorText) {
         lastErrorText = 'ws error';
+      }
+      if (isDebugEnabled()) {
+        debugState = {
+          ...debugState,
+          lastRuntimeError: {
+            at: Date.now(),
+            stage: 'socket_error_event',
+            message: String(event?.type || 'ws error'),
+            stack: null,
+          },
+        };
       }
       emitStatus();
     };
@@ -546,7 +837,8 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     ws.onclose = (event) => {
       wsConnected = false;
       webMapWs = null;
-      if (!manualWsClose && !reconnectSuppressedByVersionIncompatibility) {
+      recordCloseEvent(event);
+      if (!manualWsClose && !pageUnloading && !reconnectSuppressedByVersionIncompatibility) {
         scheduleReconnect();
       } else if (reconnectSuppressedByVersionIncompatibility && !lastErrorText) {
         const reason = String(event?.reason || '').trim();
@@ -585,6 +877,9 @@ export function createWebMapWsClient(deps: WsClientDeps) {
         lastPatch: null,
         lastWebMapAck: null,
         lastResyncRequest: null,
+        lastCloseEvent: null,
+        lastRuntimeError: null,
+        lastPerf: null,
       };
     }
     return cloneForDebug(debugState);
@@ -599,6 +894,9 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       lastPatch: null,
       lastWebMapAck: null,
       lastResyncRequest: null,
+      lastCloseEvent: null,
+      lastRuntimeError: null,
+      lastPerf: null,
     };
   }
 
@@ -606,6 +904,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     connect,
     reconnect,
     cleanup,
+    prepareForPageUnload,
     sendCommand,
     requestResync,
     isWsOpen,

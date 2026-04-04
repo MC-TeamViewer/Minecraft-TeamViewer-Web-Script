@@ -33,6 +33,74 @@ function toScopePatch(scope: { upsert: Array<{ id: string; data?: Record<string,
   return { upsert, delete: deleteIds };
 }
 
+function buildBattleChunkSyntheticId(dimension: unknown, chunkX: unknown, chunkZ: unknown) {
+  const dim = String(dimension || '').trim();
+  const x = Number(chunkX);
+  const z = Number(chunkZ);
+  if (!dim || !Number.isFinite(x) || !Number.isFinite(z)) {
+    return null;
+  }
+  return `${dim}|${Math.trunc(x)}|${Math.trunc(z)}`;
+}
+
+function toBattleChunkLocalData(ref: any, value: any) {
+  const dimension = String(ref?.dimension || '').trim();
+  const chunkX = Number(ref?.coord?.chunkX);
+  const chunkZ = Number(ref?.coord?.chunkZ);
+  const syntheticId = buildBattleChunkSyntheticId(dimension, chunkX, chunkZ);
+  if (!syntheticId) {
+    return null;
+  }
+  return {
+    id: syntheticId,
+    data: {
+      ...(value && typeof value === 'object' ? value : {}),
+      dimension,
+      chunkX: Math.trunc(chunkX),
+      chunkZ: Math.trunc(chunkZ),
+    },
+  };
+}
+
+function decodeBattleChunkSnapshot(entries: any) {
+  const mapped: Record<string, unknown> = {};
+  if (!Array.isArray(entries)) {
+    return mapped;
+  }
+  for (const entry of entries) {
+    const local = toBattleChunkLocalData(entry?.ref, entry?.data);
+    if (!local) {
+      continue;
+    }
+    mapped[local.id] = local.data;
+  }
+  return mapped;
+}
+
+function decodeBattleChunkPatch(scope: any) {
+  if (!scope || typeof scope !== 'object') {
+    return undefined;
+  }
+  const upsert: Record<string, unknown> = {};
+  for (const entry of Array.isArray(scope.upsert) ? scope.upsert : []) {
+    const local = toBattleChunkLocalData(entry?.ref, entry?.data);
+    if (!local) {
+      continue;
+    }
+    upsert[local.id] = local.data;
+  }
+
+  const deleteIds = (Array.isArray(scope.delete) ? scope.delete : [])
+    .map((item) => toBattleChunkLocalData(item, {}))
+    .filter((item): item is { id: string; data: Record<string, unknown> } => Boolean(item))
+    .map((item) => item.id);
+
+  if (!Object.keys(upsert).length && !deleteIds.length) {
+    return undefined;
+  }
+  return { upsert, delete: deleteIds };
+}
+
 function decodeWebMapAck(message: any): WebMapInboundPacket | null {
   const payload: Record<string, unknown> = {
     type: 'web_map_ack',
@@ -66,7 +134,7 @@ function decodeSnapshotFull(message: any): WebMapInboundPacket | null {
     players: message.players ?? {},
     entities: message.entities ?? {},
     waypoints: message.waypoints ?? {},
-    battleChunks: message.battleChunks ?? {},
+    battleChunks: decodeBattleChunkSnapshot(message.battleChunks),
     playerMarks: message.playerMarks ?? {},
     tabState: message.tabState ?? undefined,
     roomCode: message.roomCode ?? undefined,
@@ -99,7 +167,7 @@ function decodePatch(message: any): WebMapInboundPacket | null {
     players: toScopePatch(message.players),
     entities: toScopePatch(message.entities),
     waypoints: toScopePatch(message.waypoints),
-    battleChunks: toScopePatch(message.battleChunks),
+    battleChunks: decodeBattleChunkPatch(message.battleChunks),
     playerMarks: toScopePatch(message.playerMarks),
     meta: Object.keys(meta).length ? meta : undefined,
     server_time: message.serverTime ?? undefined,

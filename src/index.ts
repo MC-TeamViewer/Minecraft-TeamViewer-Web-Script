@@ -35,7 +35,7 @@ import {
   buildCommandTacticalWaypointDelete,
   buildCommandTacticalWaypointSet,
 } from './network/networkSchemas';
-import { createWebMapWsClient } from './network/wsClient';
+import { createWebMapWsClient, type SnapshotChangeSet } from './network/wsClient';
 import { createMapProjection } from './core/mapProjection';
 import { createSettingsUi } from './ui/settingsUi';
 
@@ -57,6 +57,16 @@ declare const unsafeWindow: Window | undefined;
   let lastWebMapMessageAt = 0;
   let versionIncompatibilityAlerted = false;
   let serverProtocolVersion: string | null = null;
+  let pageUnloading = false;
+  let deferredBootStarted = false;
+  let overlayStartTimer: ReturnType<typeof setTimeout> | null = null;
+  let uiSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let uiStatusTimer: ReturnType<typeof setTimeout> | null = null;
+  let startupObserver: MutationObserver | null = null;
+  let pendingUiDimensionRefresh = false;
+  let pendingUiDebugRefresh = false;
+  let cachedDimensionOptions = getOverviewDimensionOptions(null, CONFIG.TARGET_DIMENSION);
+  let lastUiRefreshDurationMs = 0;
 
   let wsClient: ReturnType<typeof createWebMapWsClient> | null = null;
 
@@ -298,6 +308,23 @@ declare const unsafeWindow: Window | undefined;
     return Boolean(CONFIG.DEBUG_PANEL_ENABLED);
   }
 
+  function shouldRefreshPlayerListForChange(changeSet: SnapshotChangeSet | null) {
+    if (!changeSet) return true;
+    return (
+      changeSet.kind === 'full' ||
+      changeSet.dirtyScopes.players ||
+      changeSet.dirtyScopes.playerMarks ||
+      changeSet.dirtyScopes.tabState
+    );
+  }
+
+  function updateDimensionOptionsCache() {
+    cachedDimensionOptions = getOverviewDimensionOptions(
+      latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : null,
+      CONFIG.TARGET_DIMENSION,
+    );
+  }
+
   function createDisabledDebugState() {
     return {
       diagnosis: [],
@@ -321,6 +348,13 @@ declare const unsafeWindow: Window | undefined;
         hasLeafletRef: false,
         hasCapturedMap: false,
         mapContainerConnected: false,
+        interactionPaused: false,
+        interactionReplayDroppedCount: 0,
+        lastDecodeMs: 0,
+        lastMergeMs: 0,
+        lastOverlayApplyMs: 0,
+        lastOverlayApplyMode: 'idle',
+        lastUiRefreshMs: lastUiRefreshDurationMs,
         markersOnMap: 0,
         waypointsOnMap: 0,
         battleChunksOnMap: 0,
@@ -342,6 +376,8 @@ declare const unsafeWindow: Window | undefined;
       },
       history: [],
       lastResyncRequest: null,
+      lastCloseEvent: null,
+      lastRuntimeError: null,
     };
   }
 
@@ -579,7 +615,7 @@ declare const unsafeWindow: Window | undefined;
       return ok;
     },
     onDebugStateChanged: () => {
-      updateUiStatus();
+      scheduleUiStatusUpdate({ recomputeDebug: isDebugPanelEnabled(), delayMs: 260 });
     },
   });
 
@@ -684,13 +720,13 @@ declare const unsafeWindow: Window | undefined;
     input.click();
   }
 
-  function updateUiStatus() {
+  function updateUiStatus(options: { recomputeDimensionOptions?: boolean; recomputeDebug?: boolean } = {}) {
+    const startedAt = performance.now();
+    if (options.recomputeDimensionOptions !== false) {
+      updateDimensionOptionsCache();
+    }
     const mapCounts = mapProjection.getCounts();
     const annotations = mapCounts.markers + mapCounts.waypoints;
-    const dimensionOptions = getOverviewDimensionOptions(
-      latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : null,
-      CONFIG.TARGET_DIMENSION,
-    );
     settingsUi.updateStatus(lastErrorText ? `错误: ${lastErrorText}` : '',
       {
         wsConnected,
@@ -699,11 +735,38 @@ declare const unsafeWindow: Window | undefined;
         battleChunkCount: mapCounts.battleChunks,
         roomCode: CONFIG.ROOM_CODE,
         targetDimension: CONFIG.TARGET_DIMENSION,
-        dimensionOptions,
+        dimensionOptions: cachedDimensionOptions,
         clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
         serverProtocolVersion: serverProtocolVersion || '-',
       });
-    settingsUi.updateDebug(isDebugPanelEnabled() ? buildOverlayDebugState() : createDisabledDebugState());
+    const shouldRecomputeDebug = options.recomputeDebug !== false;
+    if (shouldRecomputeDebug || !isDebugPanelEnabled()) {
+      settingsUi.updateDebug(
+        isDebugPanelEnabled()
+          ? buildOverlayDebugState()
+          : createDisabledDebugState(),
+      );
+    }
+    lastUiRefreshDurationMs = Math.max(0, performance.now() - startedAt);
+  }
+
+  function scheduleUiStatusUpdate(options: { recomputeDimensionOptions?: boolean; recomputeDebug?: boolean; delayMs?: number } = {}) {
+    pendingUiDimensionRefresh = pendingUiDimensionRefresh || Boolean(options.recomputeDimensionOptions);
+    pendingUiDebugRefresh = pendingUiDebugRefresh || Boolean(options.recomputeDebug);
+    if (uiStatusTimer !== null) {
+      return;
+    }
+    uiStatusTimer = setTimeout(() => {
+      uiStatusTimer = null;
+      const nextDimensionRefresh = pendingUiDimensionRefresh;
+      const nextDebugRefresh = pendingUiDebugRefresh;
+      pendingUiDimensionRefresh = false;
+      pendingUiDebugRefresh = false;
+      updateUiStatus({
+        recomputeDimensionOptions: nextDimensionRefresh,
+        recomputeDebug: nextDebugRefresh,
+      });
+    }, Number.isFinite(options.delayMs) ? Math.max(0, Number(options.delayMs)) : 240);
   }
 
   function buildOverlayDebugState() {
@@ -768,6 +831,13 @@ declare const unsafeWindow: Window | undefined;
         hasLeafletRef: Boolean(mapDebug.hasLeafletRef),
         hasCapturedMap: Boolean(mapDebug.hasCapturedMap),
         mapContainerConnected: Boolean(mapDebug.mapContainerConnected),
+        interactionPaused: Boolean(mapDebug.interactionPaused),
+        interactionReplayDroppedCount: Number(mapDebug.interactionReplayDroppedCount || 0),
+        lastDecodeMs: Number(wsDebug?.lastPerf?.decodeMs || 0),
+        lastMergeMs: Number(wsDebug?.lastPerf?.mergeMs || 0),
+        lastOverlayApplyMs: Number(mapDebug.lastApplyDurationMs || 0),
+        lastOverlayApplyMode: String(mapDebug.lastApplyMode || 'idle'),
+        lastUiRefreshMs: lastUiRefreshDurationMs,
         markersOnMap: Number(mapDebug.markers || 0),
         waypointsOnMap: Number(mapDebug.waypoints || 0),
         battleChunksOnMap: Number(mapDebug.battleChunks || 0),
@@ -796,6 +866,8 @@ declare const unsafeWindow: Window | undefined;
           }))
         : [],
       lastResyncRequest: wsDebug?.lastResyncRequest || null,
+      lastCloseEvent: wsDebug?.lastCloseEvent || null,
+      lastRuntimeError: wsDebug?.lastRuntimeError || null,
     };
   }
 
@@ -1176,10 +1248,27 @@ declare const unsafeWindow: Window | undefined;
   }
 
   function cleanupAll() {
+    pageUnloading = true;
     try {
+      if (overlayStartTimer !== null) {
+        clearTimeout(overlayStartTimer);
+        overlayStartTimer = null;
+      }
+      if (uiSyncTimer !== null) {
+        clearTimeout(uiSyncTimer);
+        uiSyncTimer = null;
+      }
+      if (uiStatusTimer !== null) {
+        clearTimeout(uiStatusTimer);
+        uiStatusTimer = null;
+      }
+      if (startupObserver) {
+        startupObserver.disconnect();
+        startupObserver = null;
+      }
       mapProjection.cleanup();
       settingsUi.cleanup();
-      wsClient?.cleanup();
+      wsClient?.prepareForPageUnload?.();
       autoMarkSync.reset();
 
       try { const s2 = document.getElementById('nodemc-projection-style'); if (s2) s2.remove(); } catch (_) {}
@@ -1191,6 +1280,9 @@ declare const unsafeWindow: Window | undefined;
       try { delete PAGE.__NODEMC_PLAYER_OVERLAY__; } catch (_) {}
 
       overlayStarted = false;
+      deferredBootStarted = false;
+      pendingUiDimensionRefresh = false;
+      pendingUiDebugRefresh = false;
     } catch (_) {}
   }
 
@@ -1200,31 +1292,91 @@ declare const unsafeWindow: Window | undefined;
     mapProjection.ensureOverlayStyles();
     mapProjection.ensureMapInteractionGuard();
     mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
-    updateUiStatus();
+    updateUiStatus({ recomputeDimensionOptions: true, recomputeDebug: true });
   }
 
-  function boot() {
-    installDebugConsoleApi();
-    loadConfigFromStorage();
-    CONFIG.ADMIN_WS_URL = normalizeWsUrl(CONFIG.ADMIN_WS_URL);
-    CONFIG.ROOM_CODE = normalizeRoomCode(CONFIG.ROOM_CODE);
+  function stopStartupObserver() {
+    if (!startupObserver) return;
+    startupObserver.disconnect();
+    startupObserver = null;
+  }
 
-    mapProjection.installLeafletHook();
+  function scheduleUiSync(attempt = 0) {
+    if (pageUnloading || uiSyncTimer !== null) return;
+    const delay = attempt <= 0 ? 0 : (attempt < 20 ? 50 : 200);
+    uiSyncTimer = setTimeout(() => {
+      uiSyncTimer = null;
+      if (pageUnloading) return;
+      if (!settingsUi.isMounted()) {
+        if (attempt < 120) {
+          scheduleUiSync(attempt + 1);
+        }
+        return;
+      }
+      settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
+      refreshPlayerLists();
+      updateUiStatus();
+    }, delay);
+  }
 
+  function scheduleOverlayStart(attempt = 0) {
+    if (pageUnloading || overlayStarted || overlayStartTimer !== null) return;
+    const delay = attempt <= 0 ? 0 : (attempt < 20 ? 100 : 250);
+    overlayStartTimer = setTimeout(() => {
+      overlayStartTimer = null;
+      if (pageUnloading || overlayStarted) return;
+      if (mapProjection.isMapReady()) {
+        initOverlay();
+        overlayStarted = true;
+        stopStartupObserver();
+        return;
+      }
+      if (attempt < 240) {
+        scheduleOverlayStart(attempt + 1);
+      }
+    }, delay);
+  }
+
+  function ensureStartupObserver() {
+    if (pageUnloading || overlayStarted || startupObserver || typeof MutationObserver === 'undefined') {
+      return;
+    }
+    const root = document.documentElement;
+    if (!root) return;
+    startupObserver = new MutationObserver(() => {
+      scheduleOverlayStart(0);
+    });
+    startupObserver.observe(root, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  function ensureWsClient() {
+    if (wsClient) {
+      return wsClient;
+    }
     wsClient = createWebMapWsClient({
       getConfig: () => CONFIG,
       isDebugEnabled: () => isDebugPanelEnabled(),
-      onSnapshotChanged: (snapshot) => {
+      onSnapshotChanged: (snapshot, changeSet) => {
         latestSnapshot = snapshot;
         sameServerFilterEnabled = Boolean(snapshot?.tabState?.enabled);
         settingsUi.setServerFilterEnabled(sameServerFilterEnabled);
         latestPlayerMarks = snapshot && typeof snapshot.playerMarks === 'object' && snapshot.playerMarks
           ? snapshot.playerMarks
           : {};
-        refreshPlayerLists();
+        if (shouldRefreshPlayerListForChange(changeSet)) {
+          refreshPlayerLists();
+        }
         lastErrorText = null;
-        mapProjection.applyLatestSnapshotIfPossible(snapshot);
-        updateUiStatus();
+        mapProjection.applySnapshotUpdate(snapshot, changeSet);
+        scheduleOverlayStart(0);
+        scheduleUiStatusUpdate({
+          recomputeDimensionOptions: changeSet.hasWorldRenderImpact,
+          recomputeDebug: isDebugPanelEnabled(),
+          delayMs: 180,
+        });
       },
       onAckMessage: () => {},
       onWsStatusChanged: (status) => {
@@ -1233,7 +1385,7 @@ declare const unsafeWindow: Window | undefined;
         lastWebMapMessageType = status.lastWebMapMessageType;
         lastWebMapMessageAt = status.lastWebMapMessageAt;
         serverProtocolVersion = status.serverProtocolVersion;
-        updateUiStatus();
+        scheduleUiStatusUpdate({ recomputeDebug: isDebugPanelEnabled(), delayMs: 120 });
       },
       onVersionIncompatible: (payload) => {
         if (payload.serverProtocolVersion) {
@@ -1262,38 +1414,56 @@ declare const unsafeWindow: Window | undefined;
         }
       },
     });
+    return wsClient;
+  }
 
-    wsClient.connect();
+  function startDeferredBoot() {
+    if (pageUnloading || deferredBootStarted) return;
+    deferredBootStarted = true;
 
-    settingsUi.mountWhenReady();
-    const syncUiOnReady = () => {
-      if (!settingsUi.isMounted()) {
-        PAGE.requestAnimationFrame(syncUiOnReady);
+    const run = () => {
+      if (pageUnloading) return;
+      if (!document.body) {
+        deferredBootStarted = false;
+        setTimeout(startDeferredBoot, 50);
         return;
       }
-      settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
-      refreshPlayerLists();
-      updateUiStatus();
-    };
-    syncUiOnReady();
 
-    if (CONFIG.DEBUG) {
-      console.log('[TeamViewRelay Overlay] boot', {
-        wsUrl: CONFIG.ADMIN_WS_URL,
-        reconnectMs: CONFIG.RECONNECT_INTERVAL_MS,
-      });
+      ensureWsClient().connect();
+      settingsUi.mountWhenReady();
+      scheduleUiSync(0);
+      ensureStartupObserver();
+      scheduleOverlayStart(0);
+
+      if (CONFIG.DEBUG) {
+        console.log('[TeamViewRelay Overlay] deferred boot', {
+          wsUrl: CONFIG.ADMIN_WS_URL,
+          reconnectMs: CONFIG.RECONNECT_INTERVAL_MS,
+          readyState: document.readyState,
+        });
+      }
+    };
+
+    run();
+  }
+
+  function boot() {
+    installDebugConsoleApi();
+    loadConfigFromStorage();
+    CONFIG.ADMIN_WS_URL = normalizeWsUrl(CONFIG.ADMIN_WS_URL);
+    CONFIG.ROOM_CODE = normalizeRoomCode(CONFIG.ROOM_CODE);
+
+    try {
+      mapProjection.installLeafletHook();
+    } catch (error) {
+      console.warn('[TeamViewRelay Overlay] installLeafletHook failed, fallback to DOM capture:', error);
     }
 
-    const tryStart = () => {
-      if (mapProjection.isMapReady()) {
-        initOverlay();
-        overlayStarted = true;
-        return;
-      }
-      if (!overlayStarted) PAGE.requestAnimationFrame(tryStart);
-    };
-
-    tryStart();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startDeferredBoot, { once: true });
+      return;
+    }
+    startDeferredBoot();
   }
 
   boot();

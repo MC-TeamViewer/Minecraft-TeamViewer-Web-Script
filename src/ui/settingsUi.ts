@@ -116,6 +116,20 @@ type DebugState = {
     reason: string;
     sent: boolean;
   } | null;
+  lastCloseEvent: {
+    closedAt: number;
+    code: number;
+    reason: string;
+    wasClean: boolean;
+    manual: boolean;
+    pageUnloading: boolean;
+  } | null;
+  lastRuntimeError: {
+    at: number;
+    stage: string;
+    message: string;
+    stack: string | null;
+  } | null;
 };
 
 function createDefaultDebugState(): DebugState {
@@ -162,6 +176,8 @@ function createDefaultDebugState(): DebugState {
     },
     history: [],
     lastResyncRequest: null,
+    lastCloseEvent: null,
+    lastRuntimeError: null,
   };
 }
 
@@ -799,6 +815,12 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     }
     if (debugPatch.lastResyncRequest !== undefined) {
       state.debug.lastResyncRequest = debugPatch.lastResyncRequest || null;
+    }
+    if (debugPatch.lastCloseEvent !== undefined) {
+      state.debug.lastCloseEvent = debugPatch.lastCloseEvent || null;
+    }
+    if (debugPatch.lastRuntimeError !== undefined) {
+      state.debug.lastRuntimeError = debugPatch.lastRuntimeError || null;
     }
   }
 

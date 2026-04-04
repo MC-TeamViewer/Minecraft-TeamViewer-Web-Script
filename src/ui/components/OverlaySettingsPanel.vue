@@ -168,6 +168,20 @@ type OverlayUiState = {
       reason: string;
       sent: boolean;
     } | null;
+    lastCloseEvent: {
+      closedAt: number;
+      code: number;
+      reason: string;
+      wasClean: boolean;
+      manual: boolean;
+      pageUnloading: boolean;
+    } | null;
+    lastRuntimeError: {
+      at: number;
+      stage: string;
+      message: string;
+      stack: string | null;
+    } | null;
   };
 };
 
@@ -226,6 +240,8 @@ const statusTitle = computed(() => {
 
 const debugLastInboundTime = computed(() => formatTimestamp(props.state.debug.summary.lastInboundAt));
 const debugLastResyncTime = computed(() => formatTimestamp(props.state.debug.lastResyncRequest?.requestedAt || 0));
+const debugLastCloseTime = computed(() => formatTimestamp(props.state.debug.lastCloseEvent?.closedAt || 0));
+const debugLastRuntimeErrorTime = computed(() => formatTimestamp(props.state.debug.lastRuntimeError?.at || 0));
 const debugDimensionTarget = computed(() => props.state.debug.dimensionFilter.targetDimension || props.state.debug.summary.targetDimension || '-');
 
 function setPage(nextPage: OverlayUiState['page']) {
@@ -881,6 +897,20 @@ function formatDimensionBucket(item: {
         <span>最近 resync</span>
         <strong>
           {{ state.debug.lastResyncRequest ? `${debugLastResyncTime} / ${state.debug.lastResyncRequest.reason} / ${state.debug.lastResyncRequest.sent ? '已发送' : '未发送'}` : '暂无' }}
+        </strong>
+      </div>
+
+      <div class="n-debug-resync full-width">
+        <span>最近关闭事件</span>
+        <strong>
+          {{ state.debug.lastCloseEvent ? `${debugLastCloseTime} / code ${state.debug.lastCloseEvent.code} / ${state.debug.lastCloseEvent.wasClean ? 'clean' : 'unclean'} / ${state.debug.lastCloseEvent.reason || 'no_reason'}${state.debug.lastCloseEvent.pageUnloading ? ' / unload' : ''}${state.debug.lastCloseEvent.manual ? ' / manual' : ''}` : '暂无' }}
+        </strong>
+      </div>
+
+      <div class="n-debug-resync full-width">
+        <span>最近运行时错误</span>
+        <strong>
+          {{ state.debug.lastRuntimeError ? `${debugLastRuntimeErrorTime} / ${state.debug.lastRuntimeError.stage} / ${state.debug.lastRuntimeError.message}` : '暂无' }}
         </strong>
       </div>
 

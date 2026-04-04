@@ -7,6 +7,7 @@ import {
   parseMcDisplayName,
   readNumber,
 } from '../utils/overlayUtils';
+import type { SnapshotChangeSet } from '../network/wsClient';
 
 type MapProjectionDeps = {
   page: Window;
@@ -43,8 +44,13 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let leafletRef: any = null;
   let capturedMap: any = null;
   let lastGlobalMapScanAt = 0;
-  let latestSnapshotForReplay: any = null;
+  let latestSnapshotForReplay: { snapshot: any; changeSet: SnapshotChangeSet | null } | null = null;
   let pendingSnapshotReplayTimer: ReturnType<typeof setTimeout> | null = null;
+  let mapInteractionPaused = false;
+  let pendingInteractionReplay: { snapshot: any; changeSet: SnapshotChangeSet | null } | null = null;
+  let interactionReplayDroppedCount = 0;
+  let lastApplyDurationMs = 0;
+  let lastApplyMode: 'full' | 'patch' | 'idle' = 'idle';
   let guardedMapContainer: HTMLElement | null = null;
   let hoverPopupBlockedContainer: HTMLElement | null = null;
   let tacticalMenuEl: HTMLElement | null = null;
@@ -52,8 +58,11 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let tacticalMenuEscHandler: ((event: KeyboardEvent) => void) | null = null;
   let tacticalPreviewMarker: any | null = null;
   const markersById = new Map<string, any>();
+  const markerRenderMemoById = new Map<string, string>();
   const waypointsById = new Map<string, any>();
+  const waypointRenderMemoById = new Map<string, string>();
   const battleChunkLayersById = new Map<string, any>();
+  const battleChunkRenderMemoById = new Map<string, string>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
@@ -69,7 +78,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (pendingSnapshotReplayTimer !== null) return;
     pendingSnapshotReplayTimer = setTimeout(() => {
       pendingSnapshotReplayTimer = null;
-      applyLatestSnapshotIfPossible(latestSnapshotForReplay);
+      if (!latestSnapshotForReplay) return;
+      applySnapshotUpdate(latestSnapshotForReplay.snapshot, latestSnapshotForReplay.changeSet);
     }, 0);
   }
 
@@ -83,6 +93,49 @@ export function createMapProjection(deps: MapProjectionDeps) {
         scheduleSnapshotReplay();
         emitDebugStateChanged();
       });
+    } catch (_) {}
+  }
+
+  function rememberPendingReplay(snapshot: any, changeSet: SnapshotChangeSet | null) {
+    if (!snapshot) return;
+    if (mapInteractionPaused && pendingInteractionReplay) {
+      interactionReplayDroppedCount += 1;
+    }
+    const replayRequest = { snapshot, changeSet };
+    latestSnapshotForReplay = replayRequest;
+    if (mapInteractionPaused) {
+      pendingInteractionReplay = replayRequest;
+      return;
+    }
+    pendingInteractionReplay = null;
+  }
+
+  function attachMapInteractionReplay(map: any) {
+    if (!map || typeof map.on !== 'function' || map.__nodemcInteractionReplayHooked) {
+      return;
+    }
+    map.__nodemcInteractionReplayHooked = true;
+
+    const pauseReplay = () => {
+      mapInteractionPaused = true;
+    };
+    const resumeReplay = () => {
+      mapInteractionPaused = false;
+      if (pendingInteractionReplay) {
+        latestSnapshotForReplay = pendingInteractionReplay;
+        pendingInteractionReplay = null;
+      }
+      scheduleSnapshotReplay();
+      emitDebugStateChanged();
+    };
+
+    try {
+      map.on('dragstart', pauseReplay);
+      map.on('movestart', pauseReplay);
+      map.on('zoomstart', pauseReplay);
+      map.on('dragend', resumeReplay);
+      map.on('moveend', resumeReplay);
+      map.on('zoomend', resumeReplay);
     } catch (_) {}
   }
 
@@ -686,6 +739,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const changed = capturedMap !== value;
     capturedMap = value;
     attachMapReadyReplay(value);
+    attachMapInteractionReplay(value);
     if (changed) {
       scheduleSnapshotReplay();
       emitDebugStateChanged();
@@ -1382,16 +1436,26 @@ export function createMapProjection(deps: MapProjectionDeps) {
       Boolean(payload.isReporter),
       Boolean(payload.isRiding)
     );
+    const markerMemo = [
+      Number(latLng?.lat || 0).toFixed(3),
+      Number(latLng?.lng || 0).toFixed(3),
+      zIndexOffset,
+      html,
+    ].join('|');
 
     if (!html) {
       if (existing) {
         existing.remove();
         markersById.delete(playerId);
+        markerRenderMemoById.delete(playerId);
       }
       return;
     }
 
     if (existing) {
+      if (markerRenderMemoById.get(playerId) === markerMemo) {
+        return;
+      }
       try {
         existing.setLatLng(latLng);
         if (typeof existing.setZIndexOffset === 'function') {
@@ -1405,10 +1469,12 @@ export function createMapProjection(deps: MapProjectionDeps) {
             iconAnchor: [0, 0],
           })
         );
+        markerRenderMemoById.set(playerId, markerMemo);
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         try { markersById.delete(playerId); } catch (_) {}
+        markerRenderMemoById.delete(playerId);
       }
     }
 
@@ -1426,6 +1492,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     marker.addTo(map);
     markersById.set(playerId, marker);
+    markerRenderMemoById.set(playerId, markerMemo);
   }
 
   function upsertReporterEffects(map: any, playerId: string, payload: any, isReporter: boolean) {
@@ -1538,16 +1605,26 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const latLng = worldToLatLng(map, payload.x, payload.z);
     const zIndexOffset = getWaypointZIndexOffset();
     const html = buildWaypointHtml(payload.label || payload.name || waypointId, payload.x, payload.z, payload);
+    const waypointMemo = [
+      Number(latLng?.lat || 0).toFixed(3),
+      Number(latLng?.lng || 0).toFixed(3),
+      zIndexOffset,
+      html,
+    ].join('|');
 
     if (!html) {
       if (existing) {
         existing.remove();
         waypointsById.delete(waypointId);
+        waypointRenderMemoById.delete(waypointId);
       }
       return;
     }
 
     if (existing) {
+      if (waypointRenderMemoById.get(waypointId) === waypointMemo) {
+        return;
+      }
       try {
         existing.setLatLng(latLng);
         if (typeof existing.setZIndexOffset === 'function') {
@@ -1556,10 +1633,12 @@ export function createMapProjection(deps: MapProjectionDeps) {
         existing.setIcon(
           leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
         );
+        waypointRenderMemoById.set(waypointId, waypointMemo);
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         try { waypointsById.delete(waypointId); } catch (_) {}
+        waypointRenderMemoById.delete(waypointId);
       }
     }
 
@@ -1572,6 +1651,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     marker.addTo(map);
     waypointsById.set(waypointId, marker);
+    waypointRenderMemoById.set(waypointId, waypointMemo);
   }
 
   function upsertBattleChunk(map: any, chunkId: string, payload: any) {
@@ -1580,6 +1660,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkRenderMemoById.delete(chunkId);
       }
       return;
     }
@@ -1596,6 +1677,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkRenderMemoById.delete(chunkId);
       }
       return;
     }
@@ -1604,32 +1686,49 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const bounds = buildBattleChunkBounds(map, Math.floor(chunkX), Math.floor(chunkZ));
     const existing = battleChunkLayersById.get(chunkId);
     const payloadWithRenderMode = { ...payload, renderMode };
+    const tooltipHtml = shouldShowBattleChunkDebug() ? buildBattleChunkTooltip(chunkId, payloadWithRenderMode) : '';
+    const battleChunkMemo = [
+      Math.floor(chunkX),
+      Math.floor(chunkZ),
+      renderMode,
+      String(style.color || ''),
+      String(style.weight || ''),
+      String(style.opacity || ''),
+      String(style.fillColor || ''),
+      String(style.fillOpacity || ''),
+      tooltipHtml,
+    ].join('|');
 
     if (existing) {
+      if (battleChunkRenderMemoById.get(chunkId) === battleChunkMemo) {
+        return;
+      }
       try {
         existing.setBounds(bounds);
         existing.setStyle(style);
         if (shouldShowBattleChunkDebug()) {
-          const tooltipHtml = buildBattleChunkTooltip(chunkId, payloadWithRenderMode);
           if (typeof existing.bindTooltip === 'function') {
             existing.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
           }
         } else if (typeof existing.unbindTooltip === 'function') {
           existing.unbindTooltip();
         }
+        battleChunkRenderMemoById.set(chunkId, battleChunkMemo);
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkRenderMemoById.delete(chunkId);
       }
     }
 
     const layer = leafletRef.rectangle(bounds, style);
     if (shouldShowBattleChunkDebug() && typeof layer.bindTooltip === 'function') {
-      layer.bindTooltip(buildBattleChunkTooltip(chunkId, payloadWithRenderMode), { sticky: true, direction: 'top', opacity: 0.95 });
+      layer.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
     }
     layer.addTo(map);
     battleChunkLayersById.set(chunkId, layer);
+    battleChunkRenderMemoById.set(chunkId, battleChunkMemo);
   }
 
   function removeMissingMarkers(nextIds: Set<string>) {
@@ -1637,6 +1736,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(playerId)) continue;
       marker.remove();
       markersById.delete(playerId);
+      markerRenderMemoById.delete(playerId);
     }
   }
 
@@ -1645,6 +1745,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(wpId)) continue;
       try { marker.remove(); } catch (_) {}
       waypointsById.delete(wpId);
+      waypointRenderMemoById.delete(wpId);
       trackedWaypointPositions.delete(wpId);
     }
   }
@@ -1654,6 +1755,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(chunkId)) continue;
       try { layer.remove(); } catch (_) {}
       battleChunkLayersById.delete(chunkId);
+      battleChunkRenderMemoById.delete(chunkId);
     }
   }
 
@@ -1950,6 +2052,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
     rebuildReporterEffectLayers(map);
     deps.maybeSyncAutoDetectedMarks(autoMarkSyncCandidates);
 
+    syncOverlayState();
+  }
+
+  function syncOverlayState() {
     const overlayState = {
       playersOnMap: markersById.size,
       waypointsOnMap: waypointsById.size,
@@ -1963,9 +2069,307 @@ export function createMapProjection(deps: MapProjectionDeps) {
     (PAGE as any).__NODEMC_PLAYER_OVERLAY__ = overlayState;
   }
 
+  function removeMarkerById(markerId: string) {
+    const existing = markersById.get(markerId);
+    if (!existing) return;
+    try { existing.remove(); } catch (_) {}
+    markersById.delete(markerId);
+    markerRenderMemoById.delete(markerId);
+  }
+
+  function removeWaypointById(waypointId: string) {
+    const existing = waypointsById.get(waypointId);
+    if (existing) {
+      try { existing.remove(); } catch (_) {}
+    }
+    waypointsById.delete(waypointId);
+    waypointRenderMemoById.delete(waypointId);
+    trackedWaypointPositions.delete(waypointId);
+  }
+
+  function removeBattleChunkById(chunkId: string) {
+    const existing = battleChunkLayersById.get(chunkId);
+    if (existing) {
+      try { existing.remove(); } catch (_) {}
+    }
+    battleChunkLayersById.delete(chunkId);
+    battleChunkRenderMemoById.delete(chunkId);
+  }
+
+  function removeMarkersByPrefix(prefix: string) {
+    for (const markerId of Array.from(markersById.keys())) {
+      if (!markerId.startsWith(prefix)) continue;
+      removeMarkerById(markerId);
+    }
+  }
+
+  function applySinglePlayerUpdate(
+    map: any,
+    snapshot: any,
+    playerId: string,
+    wantedDim: string,
+    reporterIdentities: ReporterIdentitySet,
+    autoMarkSyncCandidates: any[],
+  ) {
+    const players = snapshot && typeof snapshot === 'object' ? snapshot.players : null;
+    const rawNode = players && typeof players === 'object' ? (players as Record<string, any>)[playerId] : null;
+    const data = getPlayerDataNode(rawNode);
+    if (!data) {
+      removeMarkerById(playerId);
+      reporterEffectsById.delete(playerId);
+      return;
+    }
+
+    const dim = normalizeDimension(data.dimension);
+    if (wantedDim && dim !== wantedDim) {
+      removeMarkerById(playerId);
+      reporterEffectsById.delete(playerId);
+      return;
+    }
+
+    const x = readNumber(data.x);
+    const z = readNumber(data.z);
+    if (x === null || z === null) {
+      removeMarkerById(playerId);
+      reporterEffectsById.delete(playerId);
+      return;
+    }
+
+    const health = readNumber(data.health);
+    const name = String(data.playerName || data.playerUUID || playerId);
+    const existingMark = deps.getPlayerMark(String(playerId));
+    const tabInfo = deps.getTabPlayerInfo(String(playerId));
+    const autoName = deps.getTabPlayerName(String(playerId)) || name;
+    const displayNameForAutoMark = (tabInfo && tabInfo.teamText) ? `[${tabInfo.teamText}] ${autoName}` : autoName;
+    const autoMark = deps.autoTeamFromName(displayNameForAutoMark);
+    const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
+    const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
+    const isManualMark = Boolean(existingMark) && !existingActsAsAuto;
+
+    if (!isManualMark) {
+      if (autoMark && (autoMark.team === 'friendly' || autoMark.team === 'enemy')) {
+        const desiredTeam = normalizeTeam(autoMark.team);
+        const desiredColor = normalizeColor(autoMark.color, deps.getConfiguredTeamColor(desiredTeam));
+        const hasSameAutoMark = Boolean(existingMark)
+          && existingActsAsAuto
+          && normalizeTeam(existingMark.team) === desiredTeam
+          && normalizeColor(existingMark.color, deps.getConfiguredTeamColor(desiredTeam)) === desiredColor;
+        if (!hasSameAutoMark) {
+          autoMarkSyncCandidates.push({
+            action: 'set',
+            playerId,
+            team: desiredTeam,
+            color: desiredColor,
+          });
+        }
+      } else if (existingActsAsAuto) {
+        autoMarkSyncCandidates.push({
+          action: 'clear',
+          playerId,
+        });
+      }
+    }
+
+    const effectiveMark = isManualMark
+      ? existingMark
+      : (autoMark || (existingActsAsAuto ? null : existingMark));
+
+    const townInfo = tabInfo && tabInfo.teamText
+      ? {
+          text: tabInfo.teamText,
+          color: tabInfo.teamColor || null,
+        }
+      : null;
+    const isReporter = isReportingPlayer(String(playerId), rawNode, data, reporterIdentities);
+    const isRiding = parseBooleanFlag((data as any).isRiding);
+
+    upsertMarker(map, String(playerId), { x, z, health, name, mark: effectiveMark, townInfo, isReporter, isRiding });
+    upsertReporterEffects(map, String(playerId), { x, z, mark: effectiveMark }, isReporter);
+  }
+
+  function applyDirtyHorseEntities(map: any, snapshot: any, wantedDim: string, entityIds: Iterable<string>) {
+    const entities = snapshot && typeof snapshot === 'object' ? snapshot.entities : null;
+    for (const entityId of entityIds) {
+      const markerId = `entity:${entityId}`;
+      const rawNode = entities && typeof entities === 'object' ? (entities as Record<string, any>)[entityId] : null;
+      const data = getPlayerDataNode(rawNode);
+      if (!CONFIG.SHOW_HORSE_ENTITIES || !data) {
+        removeMarkerById(markerId);
+        continue;
+      }
+
+      const entityType = String(data.entityType || '').toLowerCase();
+      const dim = normalizeDimension(data.dimension);
+      const x = readNumber(data.x);
+      const z = readNumber(data.z);
+      if (!entityType.includes('horse') || (wantedDim && dim !== wantedDim) || x === null || z === null) {
+        removeMarkerById(markerId);
+        continue;
+      }
+
+      const entityName = String(data.entityName || '马').trim() || '马';
+      upsertMarker(map, markerId, {
+        x,
+        z,
+        health: null,
+        name: entityName,
+        mark: {
+          team: 'neutral',
+          color: deps.getConfiguredTeamColor('neutral'),
+          label: '',
+        },
+        townInfo: null,
+        kind: 'horse',
+      });
+    }
+  }
+
+  function rebuildArmorStandPairMarkers(map: any, snapshot: any, wantedDim: string) {
+    removeMarkersByPrefix('entity:armor-stand-pair:');
+    if (!Boolean(CONFIG.SHOW_CAPTURE_INFO)) {
+      return;
+    }
+    for (const armorStandPair of collectRenderableArmorStandPairs(snapshot, wantedDim)) {
+      upsertMarker(map, armorStandPair.markerId, {
+        x: armorStandPair.x,
+        z: armorStandPair.z,
+        health: null,
+        name: armorStandPair.name,
+        mark: {
+          team: 'neutral',
+          color: armorStandPair.color,
+          label: '',
+        },
+        townInfo: null,
+        kind: 'armor-stand-pair',
+      });
+    }
+  }
+
+  function rebuildVisibleWaypoints(map: any, snapshot: any, wantedDim: string) {
+    const waypoints = snapshot && typeof snapshot === 'object' ? snapshot.waypoints : null;
+    const nextWaypointIds = new Set<string>();
+    if (waypoints && typeof waypoints === 'object') {
+      for (const [wpId, rawNode] of Object.entries(waypoints)) {
+        if (!rawNode) continue;
+        const data = (rawNode as any).data && typeof (rawNode as any).data === 'object' ? (rawNode as any).data : rawNode;
+        if (!data) continue;
+        const dim = normalizeDimension((data as any).dimension);
+        if (wantedDim && dim !== wantedDim) continue;
+        const resolvedPos = resolveWaypointTrackedPosition(snapshot, String(wpId), data, wantedDim);
+        if (!resolvedPos) continue;
+
+        nextWaypointIds.add(String(wpId));
+        upsertWaypoint(map, String(wpId), {
+          id: String(wpId),
+          x: resolvedPos.x,
+          z: resolvedPos.z,
+          label: (data as any).label || (data as any).name || (data as any).title || String(wpId),
+          color: (data as any).color || ((data as any).colorHex ? (data as any).colorHex : null) || null,
+          kind: (data as any).waypointKind || null,
+          ownerName: (data as any).ownerName || null,
+          ownerId: (data as any).ownerId || null,
+          targetType: (data as any).targetType || null,
+          targetEntityId: (data as any).targetEntityId || null,
+        });
+      }
+    }
+    removeMissingWaypoints(nextWaypointIds);
+  }
+
+  function applyDirtyBattleChunks(map: any, snapshot: any, wantedDim: string, changeSet: SnapshotChangeSet) {
+    const battleChunks = snapshot && typeof snapshot === 'object' ? snapshot.battleChunks : null;
+    for (const chunkId of changeSet.deleteIds.battleChunks) {
+      removeBattleChunkById(String(chunkId));
+    }
+    for (const chunkId of changeSet.upsertIds.battleChunks) {
+      const rawNode = battleChunks && typeof battleChunks === 'object' ? (battleChunks as Record<string, any>)[chunkId] : null;
+      if (!rawNode || typeof rawNode !== 'object') {
+        removeBattleChunkById(String(chunkId));
+        continue;
+      }
+      const data = (rawNode as any).data && typeof (rawNode as any).data === 'object' ? (rawNode as any).data : rawNode;
+      const dim = normalizeDimension((data as any).dimension);
+      const chunkX = readNumber((data as any).chunkX);
+      const chunkZ = readNumber((data as any).chunkZ);
+      const symbol = String((data as any).symbol || '').trim();
+      if ((wantedDim && dim !== wantedDim) || chunkX === null || chunkZ === null || symbol === '┼') {
+        removeBattleChunkById(String(chunkId));
+        continue;
+      }
+      upsertBattleChunk(map, String(chunkId), {
+        chunkX,
+        chunkZ,
+        dimension: dim,
+        symbol,
+        markerType: (data as any).markerType || '',
+        colorRaw: (data as any).colorRaw || '',
+        colorNote: (data as any).colorNote || '',
+        observedAt: (data as any).observedAt || null,
+        positionSampledAt: (data as any).positionSampledAt || null,
+        alignmentSource: (data as any).alignmentSource || '',
+      });
+    }
+  }
+
+  function applySnapshotPatch(map: any, snapshot: any, changeSet: SnapshotChangeSet) {
+    const wantedDim = normalizeDimension(CONFIG.TARGET_DIMENSION);
+    const players = snapshot && typeof snapshot === 'object' ? snapshot.players : null;
+    const playerIds = players && typeof players === 'object' ? Object.keys(players) : [];
+    const reporterIdentities = getReportingPlayerIdentities(snapshot);
+    const autoMarkSyncCandidates: any[] = [];
+
+    const shouldRefreshAllPlayers =
+      changeSet.dirtyScopes.playerMarks ||
+      changeSet.dirtyScopes.tabState ||
+      changeSet.dirtyScopes.connections;
+
+    if (changeSet.dirtyScopes.players) {
+      for (const playerId of changeSet.deleteIds.players) {
+        removeMarkerById(String(playerId));
+        reporterEffectsById.delete(String(playerId));
+      }
+    }
+
+    if (shouldRefreshAllPlayers) {
+      for (const playerId of playerIds) {
+        applySinglePlayerUpdate(map, snapshot, String(playerId), wantedDim, reporterIdentities, autoMarkSyncCandidates);
+      }
+    } else if (changeSet.dirtyScopes.players) {
+      for (const playerId of changeSet.upsertIds.players) {
+        applySinglePlayerUpdate(map, snapshot, String(playerId), wantedDim, reporterIdentities, autoMarkSyncCandidates);
+      }
+    }
+
+    if (changeSet.dirtyScopes.entities) {
+      const dirtyEntityIds = new Set<string>([
+        ...changeSet.upsertIds.entities.map((item) => String(item)),
+        ...changeSet.deleteIds.entities.map((item) => String(item)),
+      ]);
+      applyDirtyHorseEntities(map, snapshot, wantedDim, dirtyEntityIds);
+      rebuildArmorStandPairMarkers(map, snapshot, wantedDim);
+    }
+
+    if (changeSet.dirtyScopes.waypoints || changeSet.dirtyScopes.players || changeSet.dirtyScopes.entities) {
+      rebuildVisibleWaypoints(map, snapshot, wantedDim);
+    }
+
+    if (changeSet.dirtyScopes.battleChunks) {
+      applyDirtyBattleChunks(map, snapshot, wantedDim, changeSet);
+    }
+
+    if (shouldRefreshAllPlayers || changeSet.dirtyScopes.players || changeSet.dirtyScopes.entities) {
+      rebuildReporterEffectLayers(map);
+    }
+
+    deps.maybeSyncAutoDetectedMarks(autoMarkSyncCandidates);
+    syncOverlayState();
+  }
+
   function isMapReady() {
     const map = capturedMap || findMapByDom();
     ensureMapInteractionGuard();
+    attachMapInteractionReplay(map);
     if (!map || !leafletRef || !map._loaded) {
       return false;
     }
@@ -1978,16 +2382,31 @@ export function createMapProjection(deps: MapProjectionDeps) {
     return true;
   }
 
-  function applyLatestSnapshotIfPossible(snapshot: any) {
-    latestSnapshotForReplay = snapshot;
+  function applySnapshotUpdate(snapshot: any, changeSet: SnapshotChangeSet | null = null) {
+    rememberPendingReplay(snapshot, changeSet);
     if (!snapshot) return false;
     ensureOverlayStyles();
     const map = capturedMap || findMapByDom();
     ensureMapInteractionGuard();
+    attachMapInteractionReplay(map);
     if (!map || !leafletRef || !map._loaded) return false;
-    applySnapshotPlayers(map, snapshot);
+    if (mapInteractionPaused) return false;
+
+    const applyStartedAt = performance.now();
+    if (!changeSet || changeSet.kind === 'full') {
+      applySnapshotPlayers(map, snapshot);
+      lastApplyMode = 'full';
+    } else {
+      applySnapshotPatch(map, snapshot, changeSet);
+      lastApplyMode = 'patch';
+    }
+    lastApplyDurationMs = Math.max(0, performance.now() - applyStartedAt);
     emitDebugStateChanged();
     return true;
+  }
+
+  function applyLatestSnapshotIfPossible(snapshot: any) {
+    return applySnapshotUpdate(snapshot, null);
   }
 
   function focusOnWorldPosition(x: number, z: number) {
@@ -2027,6 +2446,11 @@ export function createMapProjection(deps: MapProjectionDeps) {
       hasLeafletRef: Boolean(leafletRef),
       hasCapturedMap: Boolean(capturedMap),
       mapContainerConnected: Boolean(container && container.isConnected),
+      interactionPaused: mapInteractionPaused,
+      pendingInteractionReplay: Boolean(pendingInteractionReplay),
+      interactionReplayDroppedCount,
+      lastApplyDurationMs,
+      lastApplyMode,
       markers: markersById.size,
       waypoints: waypointsById.size,
       battleChunks: battleChunkLayersById.size,
@@ -2042,22 +2466,26 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { m.remove(); } catch (_) {}
     }
     markersById.clear();
+    markerRenderMemoById.clear();
 
     for (const m of waypointsById.values()) {
       try { m.remove(); } catch (_) {}
     }
     waypointsById.clear();
+    waypointRenderMemoById.clear();
 
     for (const layer of battleChunkLayersById.values()) {
       try { layer.remove(); } catch (_) {}
     }
     battleChunkLayersById.clear();
+    battleChunkRenderMemoById.clear();
 
     for (const layer of reporterEffectLayersByStyle.values()) {
       try { layer.remove(); } catch (_) {}
     }
     reporterEffectLayersByStyle.clear();
     reporterEffectsById.clear();
+    trackedWaypointPositions.clear();
 
     try {
       const blockStyle = document.getElementById('nodemc-map-hover-popup-style');
@@ -2067,6 +2495,12 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { clearTimeout(pendingSnapshotReplayTimer); } catch (_) {}
       pendingSnapshotReplayTimer = null;
     }
+    latestSnapshotForReplay = null;
+    pendingInteractionReplay = null;
+    mapInteractionPaused = false;
+    interactionReplayDroppedCount = 0;
+    lastApplyDurationMs = 0;
+    lastApplyMode = 'idle';
     emitDebugStateChanged();
   }
 
@@ -2076,6 +2510,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     findMapByDom,
     ensureMapInteractionGuard,
     isMapReady,
+    applySnapshotUpdate,
     applyLatestSnapshotIfPossible,
     focusOnWorldPosition,
     getCounts,
