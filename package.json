@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "proto:generate": "bash ./scripts/generate_proto_ts.sh",
+    "predev": "pnpm proto:generate",
     "dev": "vite",
+    "prebuild": "pnpm proto:generate",
     "build": "vite build",
     "preview": "vite preview"
   },

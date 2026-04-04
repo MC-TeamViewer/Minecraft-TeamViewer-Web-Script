@@ -18,3 +18,4 @@ node_modules/
 dist/
 .vite/
 build-artifacts/
+src/network/proto/

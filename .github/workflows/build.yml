@@ -1,11 +1,31 @@
-# Minecraft Mod 编译的 GitHub Actions 配置
-name: Minecraft Web Script CI
+# Team View Relay Web Script GitHub Actions 配置
+name: Team View Relay Web Script CI
 
 on:
   push:
     branches: [ "main", "dev" ]
+    paths:
+      - ".github/workflows/build.yml"
+      - ".gitmodules"
+      - "Taskfile.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "buf.gen.yaml"
+      - "scripts/**"
+      - "src/**"
+      - "third_party/TeamViewRelay-Protocol"
   pull_request:
     branches: [ "main", "dev" ]
+    paths:
+      - ".github/workflows/build.yml"
+      - ".gitmodules"
+      - "Taskfile.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "buf.gen.yaml"
+      - "scripts/**"
+      - "src/**"
+      - "third_party/TeamViewRelay-Protocol"
 
 jobs:
   build:
@@ -16,16 +36,19 @@ jobs:
 
     steps:
       # 1. 检出代码仓库
-      - uses: actions/checkout@v6
-        # 如果你使用了git子模块（比如Fabric API），需要添加这行
+      - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
       # 2. 设置环境
+      - name: Set up Buf
+        uses: bufbuild/buf-setup-action@v1
+
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
-          node-version: '25'
+          node-version: '22'
+          cache: 'pnpm'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -33,7 +56,7 @@ jobs:
           version: 10
       
       - name: Setup Task
-        uses: DiyRex/action-setup-taskfile@v1.0.0
+        uses: arduino/setup-task@v2
 
       # 3. 开始编译
 
@@ -46,7 +69,7 @@ jobs:
         id: upload-monkey
         uses: actions/upload-artifact@v4
         with:
-          name: MC-Teamviewer-mod-web-script
+          name: team-view-relay-web-script
           path: build-artifacts/*.js
           if-no-files-found: error
       

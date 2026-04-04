@@ -1,9 +1,24 @@
+import { create } from '@bufbuild/protobuf';
 import {
   ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
   ADMIN_NETWORK_PROTOCOL_VERSION,
   LOCAL_PROGRAM_VERSION,
 } from '../constants';
 import { normalizeDimension, normalizeRoomCode } from '../utils/overlayUtils';
+import {
+  CommandPlayerMarkClearAllSchema,
+  CommandPlayerMarkClearSchema,
+  CommandPlayerMarkSetSchema,
+  CommandSameServerFilterSetSchema,
+  CommandTacticalWaypointSetSchema,
+  ResyncRequestSchema,
+  WaypointsDeleteSchema,
+  WebMapCommandSchema,
+  WebMapHandshakeRequestSchema,
+  WireChannel,
+  WireEnvelopeSchema,
+  type WireEnvelope,
+} from './proto/teamviewer/v1/teamviewer_pb';
 
 export type PlayerData = {
   x: number;
@@ -170,69 +185,7 @@ export type WebMapSnapshot = {
   server_time: number | null;
 };
 
-export type WebMapHandshakePacket = {
-  type: 'handshake';
-  networkProtocolVersion: string;
-  minimumCompatibleNetworkProtocolVersion: string;
-  localProgramVersion: string;
-  roomCode: string;
-};
-
-export type WebMapResyncRequestPacket = {
-  type: 'resync_req';
-  reason?: string;
-};
-
-export type CommandPlayerMarkSetPacket = {
-  type: 'command_player_mark_set';
-  playerId: string;
-  team: string;
-  color: string;
-  label?: string;
-  source: 'auto' | 'manual';
-};
-
-export type CommandPlayerMarkClearPacket = {
-  type: 'command_player_mark_clear';
-  playerId: string;
-};
-
-export type CommandPlayerMarkClearAllPacket = {
-  type: 'command_player_mark_clear_all';
-};
-
-export type CommandSameServerFilterSetPacket = {
-  type: 'command_same_server_filter_set';
-  enabled: boolean;
-};
-
-export type CommandTacticalWaypointSetPacket = {
-  type: 'command_tactical_waypoint_set';
-  x: number;
-  z: number;
-  label: string;
-  tacticalType: string;
-  color: string;
-  ttlSeconds: number;
-  permanent: boolean;
-  roomCode: string;
-  dimension: string;
-};
-
-export type WaypointsDeletePacket = {
-  type: 'waypoints_delete';
-  waypointIds: string[];
-};
-
-export type WebMapOutboundPacket =
-  | WebMapHandshakePacket
-  | WebMapResyncRequestPacket
-  | CommandPlayerMarkSetPacket
-  | CommandPlayerMarkClearPacket
-  | CommandPlayerMarkClearAllPacket
-  | CommandSameServerFilterSetPacket
-  | CommandTacticalWaypointSetPacket
-  | WaypointsDeletePacket;
+export type WebMapOutboundPacket = WireEnvelope;
 
 export type WebMapAckInboundPacket = {
   type: 'web_map_ack';
@@ -318,14 +271,23 @@ export function createEmptyWebMapSnapshotModel(): WebMapSnapshot {
   };
 }
 
-export function buildWebMapHandshake(roomCode: string): WebMapHandshakePacket {
-  return {
-    type: 'handshake',
-    networkProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
-    minimumCompatibleNetworkProtocolVersion: ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
-    localProgramVersion: LOCAL_PROGRAM_VERSION,
-    roomCode: normalizeRoomCode(roomCode),
-  };
+function createWebMapEnvelope(payload: WireEnvelope['payload']): WebMapOutboundPacket {
+  return create(WireEnvelopeSchema, {
+    channel: WireChannel.WEB_MAP,
+    payload,
+  });
+}
+
+export function buildWebMapHandshake(roomCode: string): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapHandshakeRequest',
+    value: create(WebMapHandshakeRequestSchema, {
+      networkProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
+      minimumCompatibleNetworkProtocolVersion: ADMIN_MIN_COMPATIBLE_NETWORK_PROTOCOL_VERSION,
+      localProgramVersion: LOCAL_PROGRAM_VERSION,
+      roomCode: normalizeRoomCode(roomCode),
+    }),
+  });
 }
 
 export function buildCommandPlayerMarkSet(payload: {
@@ -334,33 +296,62 @@ export function buildCommandPlayerMarkSet(payload: {
   color: string;
   label?: string;
   source: 'auto' | 'manual';
-}) {
-  return {
-    type: 'command_player_mark_set',
-    playerId: payload.playerId,
-    team: payload.team,
-    color: payload.color,
-    label: payload.label,
-    source: payload.source,
-  };
+}): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'setPlayerMark',
+        value: create(CommandPlayerMarkSetSchema, {
+          playerId: payload.playerId,
+          team: payload.team,
+          color: payload.color,
+          label: payload.label,
+          source: payload.source,
+        }),
+      },
+    }),
+  });
 }
 
-export function buildCommandPlayerMarkClear(playerId: string): CommandPlayerMarkClearPacket {
-  return {
-    type: 'command_player_mark_clear',
-    playerId,
-  };
+export function buildCommandPlayerMarkClear(playerId: string): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'clearPlayerMark',
+        value: create(CommandPlayerMarkClearSchema, {
+          playerId,
+        }),
+      },
+    }),
+  });
 }
 
-export function buildCommandPlayerMarkClearAll(): CommandPlayerMarkClearAllPacket {
-  return { type: 'command_player_mark_clear_all' };
+export function buildCommandPlayerMarkClearAll(): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'clearAllPlayerMarks',
+        value: create(CommandPlayerMarkClearAllSchema, {}),
+      },
+    }),
+  });
 }
 
-export function buildCommandSameServerFilterSet(enabled: boolean): CommandSameServerFilterSetPacket {
-  return {
-    type: 'command_same_server_filter_set',
-    enabled: Boolean(enabled),
-  };
+export function buildCommandSameServerFilterSet(enabled: boolean): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'setSameServerFilter',
+        value: create(CommandSameServerFilterSetSchema, {
+          enabled: Boolean(enabled),
+        }),
+      },
+    }),
+  });
 }
 
 export function buildCommandTacticalWaypointSet(payload: {
@@ -373,33 +364,54 @@ export function buildCommandTacticalWaypointSet(payload: {
   permanent: boolean;
   roomCode: string;
   dimension: string;
-}): CommandTacticalWaypointSetPacket {
-  return {
-    type: 'command_tactical_waypoint_set',
-    x: payload.x,
-    z: payload.z,
-    label: payload.label,
-    tacticalType: payload.tacticalType,
-    color: payload.color,
-    ttlSeconds: payload.ttlSeconds,
-    permanent: payload.permanent,
-    roomCode: normalizeRoomCode(payload.roomCode),
-    dimension: normalizeDimension(payload.dimension) || 'minecraft:overworld',
-  };
+}): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'setTacticalWaypoint',
+        value: create(CommandTacticalWaypointSetSchema, {
+          x: payload.x,
+          z: payload.z,
+          label: payload.label,
+          tacticalType: payload.tacticalType,
+          color: payload.color,
+          ttlSeconds: payload.ttlSeconds,
+          permanent: payload.permanent,
+          roomCode: normalizeRoomCode(payload.roomCode),
+          dimension: normalizeDimension(payload.dimension) || 'minecraft:overworld',
+        }),
+      },
+    }),
+  });
 }
 
-export function buildCommandTacticalWaypointDelete(waypointId: string): WaypointsDeletePacket {
-  return {
-    type: 'waypoints_delete',
-    waypointIds: [String(waypointId || '').trim()].filter(Boolean),
-  };
+export function buildCommandTacticalWaypointDelete(waypointId: string): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'deleteWaypoints',
+        value: create(WaypointsDeleteSchema, {
+          waypointIds: [String(waypointId || '').trim()].filter(Boolean),
+        }),
+      },
+    }),
+  });
 }
 
-export function buildWebMapResyncRequest(reason = 'baseline_missing'): WebMapResyncRequestPacket {
-  return {
-    type: 'resync_req',
-    reason,
-  };
+export function buildWebMapResyncRequest(reason = 'baseline_missing'): WebMapOutboundPacket {
+  return createWebMapEnvelope({
+    case: 'webMapCommand',
+    value: create(WebMapCommandSchema, {
+      command: {
+        case: 'resyncRequest',
+        value: create(ResyncRequestSchema, {
+          reason,
+        }),
+      },
+    }),
+  });
 }
 
 export function parseWebMapInboundPacket(payload: unknown): WebMapInboundPacket | null {

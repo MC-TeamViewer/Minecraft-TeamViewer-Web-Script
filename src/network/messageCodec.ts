@@ -1,17 +1,8 @@
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
-import type { WebMapInboundPacket, WebMapOutboundPacket } from './networkSchemas';
+import { fromBinary, toBinary } from '@bufbuild/protobuf';
+import type { WebMapInboundPacket } from './networkSchemas';
 import {
-  CommandPlayerMarkClearAllSchema,
-  CommandPlayerMarkClearSchema,
-  CommandPlayerMarkSetSchema,
-  CommandSameServerFilterSetSchema,
-  CommandTacticalWaypointSetSchema,
-  ResyncRequestSchema,
-  WaypointsDeleteSchema,
-  WebMapCommandSchema,
-  WebMapHandshakeRequestSchema,
-  WireChannel,
   WireEnvelopeSchema,
+  type WireEnvelope,
 } from './proto/teamviewer/v1/teamviewer_pb';
 
 function toScopePatch(scope: { upsert: Array<{ id: string; data?: Record<string, unknown> }>; delete: string[] } | undefined) {
@@ -173,115 +164,14 @@ function decodePatch(message: any): WebMapInboundPacket | null {
   };
 }
 
-function encodeEnvelope(caseName: string, value: unknown): ArrayBuffer {
-  return toBinary(WireEnvelopeSchema, create(WireEnvelopeSchema, {
-    channel: WireChannel.WIRE_CHANNEL_WEB_MAP,
-    payload: {
-      case: caseName as any,
-      value,
-    },
-  })).buffer as ArrayBuffer;
-}
-
 export interface NetworkMessageCodec {
-  encode(packet: WebMapOutboundPacket): ArrayBuffer;
+  encode(packet: WireEnvelope): ArrayBuffer;
   decode(payload: ArrayBuffer | Uint8Array | string): WebMapInboundPacket | null;
 }
 
 export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
-  encode(packet: WebMapOutboundPacket): ArrayBuffer {
-    switch (packet.type) {
-      case 'handshake': {
-        return encodeEnvelope('webMapHandshakeRequest', create(WebMapHandshakeRequestSchema, {
-          networkProtocolVersion: packet.networkProtocolVersion,
-          minimumCompatibleNetworkProtocolVersion: packet.minimumCompatibleNetworkProtocolVersion,
-          localProgramVersion: packet.localProgramVersion,
-          roomCode: packet.roomCode,
-        }));
-      }
-      case 'resync_req': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'resyncRequest',
-            value: create(ResyncRequestSchema, {
-              reason: packet.reason,
-            }),
-          },
-        }));
-      }
-      case 'command_player_mark_set': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'setPlayerMark',
-            value: create(CommandPlayerMarkSetSchema, {
-              playerId: packet.playerId,
-              team: packet.team,
-              color: packet.color,
-              label: packet.label,
-              source: packet.source,
-            }),
-          },
-        }));
-      }
-      case 'command_player_mark_clear': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'clearPlayerMark',
-            value: create(CommandPlayerMarkClearSchema, {
-              playerId: packet.playerId,
-            }),
-          },
-        }));
-      }
-      case 'command_player_mark_clear_all': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'clearAllPlayerMarks',
-            value: create(CommandPlayerMarkClearAllSchema, {}),
-          },
-        }));
-      }
-      case 'command_same_server_filter_set': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'setSameServerFilter',
-            value: create(CommandSameServerFilterSetSchema, {
-              enabled: Boolean(packet.enabled),
-            }),
-          },
-        }));
-      }
-      case 'command_tactical_waypoint_set': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'setTacticalWaypoint',
-            value: create(CommandTacticalWaypointSetSchema, {
-              x: packet.x,
-              z: packet.z,
-              label: packet.label,
-              dimension: packet.dimension,
-              tacticalType: packet.tacticalType,
-              permanent: packet.permanent,
-              ttlSeconds: packet.ttlSeconds,
-              color: packet.color,
-              roomCode: packet.roomCode,
-            }),
-          },
-        }));
-      }
-      case 'waypoints_delete': {
-        return encodeEnvelope('webMapCommand', create(WebMapCommandSchema, {
-          command: {
-            case: 'deleteWaypoints',
-            value: create(WaypointsDeleteSchema, {
-              waypointIds: packet.waypointIds,
-            }),
-          },
-        }));
-      }
-      default:
-        throw new Error(`Unsupported web-map outbound packet: ${(packet as { type?: string }).type || 'unknown'}`);
-    }
+  encode(packet: WireEnvelope): ArrayBuffer {
+    return toBinary(WireEnvelopeSchema, packet).buffer as ArrayBuffer;
   }
 
   decode(payload: ArrayBuffer | Uint8Array | string): WebMapInboundPacket | null {
