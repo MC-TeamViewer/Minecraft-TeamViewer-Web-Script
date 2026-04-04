@@ -1,50 +1,164 @@
-# NodeMC 地图玩家投影（Vue3 + Vite）
+# TeamViewRelay 网页地图脚本
 
-这个目录已从单文件油猴脚本重构为 Vue3 + Vite 工程，便于模块化开发与后续功能扩展。
+一个基于 Vue 3 + Vite 构建的 Tampermonkey 脚本，用于把 TeamViewRelay 后端中的远程玩家、路标和战局信息投影到 squaremap 网页地图。
 
-## 目录结构
+相关组件：
 
-- `src/index.ts`：主入口（业务编排）
-- `src/core/`：核心业务模块
-	- `autoMarkSync.ts`：自动标记同步
-	- `mapProjection.ts`：地图投影与渲染
-- `src/network/`：网络协议与 WS 客户端
-	- `networkSchemas.ts`：协议报文模型与构造函数
-	- `messageCodec.ts`：报文编解码抽象（默认 ProtoBuf）
-- `proto/`：由共享 `.proto` 在本地生成的 TypeScript 协议代码
-	- `wsClient.ts`：管理端 WS 通道
-- `src/ui/`：UI 适配层与样式
-	- `settingsUi.ts`：Vue 面板适配
-	- `styles.ts`：样式模板
-	- `components/OverlaySettingsPanel.vue`：设置面板组件
-- `src/config/configTransfer.ts`：配置导入导出
-- `src/utils/overlayUtils.ts`：通用归一化与补丁工具
-- `src/meta.ts`：集中元信息（userscript / protocol / app）
-- `src/constants.ts`：运行时常量与默认配置
-- `vite.config.ts`：构建配置（元信息来自 `src/meta.ts`）
+- [Minecraft-TeamViewer-Backend](https://github.com/MC-TeamViewer/Minecraft-TeamViewer-Backend)：提供 `/web-map/ws` 数据通道
+- [Minecraft_TeamViewer](https://github.com/MC-TeamViewer/Minecraft_TeamViewer)：负责从 Minecraft 客户端上报团队状态
+- [map-nodemc-plugin-blocker](https://github.com/MC-TeamViewer/map-nodemc-plugin-blocker)：可选的 NodeMC 页面屏蔽脚本
 
-## 新增功能/选项建议流程
+## 项目简介
 
-1. 在 `src/constants.ts` 的 `DEFAULT_CONFIG` 增加默认值。
-2. 在 `src/ui/components/OverlaySettingsPanel.vue` 增加对应输入控件并绑定到 `state.form.*`。
-3. 在 `src/ui/settingsUi.ts` 的 `fillFormFromConfig` / `readFormCandidate` 增加字段映射。
-4. 在 `src/utils/overlayUtils.ts` 的 `sanitizeConfig` 增加该配置的归一化逻辑。
+这个脚本运行在浏览器中，连接 TeamViewRelay 后端后，会把同一房间号（`roomCode`）下的状态渲染到 squaremap 页面。
 
-以上流程可保证：UI、存储、配置校验三者同步，降低后续加选项时的遗漏风险。
+当前主要用途：
 
-## 协议与元信息
+- 显示远程玩家投影
+- 显示共享路标、战术标记和战局区块
+- 提供浏览器侧的配置面板、配置导入导出和连接控制
 
-- 协议报文模型集中在 `src/network/networkSchemas.ts`。
-- 传输编解码由 `src/network/messageCodec.ts` 负责，默认使用 ProtoBuf（二进制帧）。
-- 共享协议源位于 `third_party/TeamViewRelay-Protocol/proto/teamviewer/v1/teamviewer.proto`，使用 `pnpm proto:generate` 本地生成 TS 产物。
-- 协议版本、userscript 元信息、应用元信息集中在 `src/meta.ts`，避免分散硬编码。
+## 适用场景 / 与其他项目关系
 
-## 子模块与协议版本
+- 需要配合 `Minecraft-TeamViewer-Backend` 使用，单独安装脚本不会产生远程投影数据。
+- 一般由 `Minecraft_TeamViewer` 上报状态，网页地图脚本负责可视化。
+- `map-nodemc-plugin-blocker` 是可选附加脚本，只用于屏蔽 NodeMC 页面上的某些问题扩展。
 
-- clone 推荐使用：`git clone --recursive`
-- 已有仓库补拉子模块：`git submodule update --init --recursive`
-- 当前仓库依赖的是被锁定的协议 submodule commit，不会自动跟随协议仓库远端更新
-- 升级协议版本的标准流程：
+## 快速开始
+
+1. 安装 Tampermonkey。
+2. 安装本脚本。
+3. 启动后端 `Minecraft-TeamViewer-Backend`。
+4. 打开受支持的 squaremap 页面。
+5. 在脚本设置中填写后端地址和房间号（`roomCode`）。
+6. 验证地图上是否出现远程玩家、路标或战局区块。
+
+## 安装 / 运行
+
+需要：
+
+- Tampermonkey
+- 一个可访问的 TeamViewRelay 后端
+
+当前脚本支持的站点：
+
+- `https://map.nodemc.cc/*`
+- `http://map.nodemc.cc/*`
+- `https://map.fltown.cn/*`
+- `http://map.fltown.cn/*`
+
+安装方式有两种。
+
+### 方式一：直接安装现成脚本
+
+仓库内可直接导入的脚本产物：
+
+- `build-artifacts/team-view-relay-web-script-v0.4.8-proto0.6.0.user.js`
+
+也可以自行构建后，导入 `dist/*.user.js`。
+
+### 方式二：本地开发构建
+
+```bash
+pnpm install
+pnpm dev
+pnpm build
+```
+
+构建产物位于：
+
+- `dist/*.user.js`
+
+## 配置或使用说明
+
+### 首次接入流程
+
+1. 安装脚本后打开受支持的 squaremap 页面。
+2. 打开脚本设置面板。
+3. 填写后端地址，例如 `ws://127.0.0.1:8765/web-map/ws`。
+4. 设置房间号（`roomCode`），默认是 `default`。
+5. 应用连接设置并等待连接成功。
+6. 如果对应房间里已有 Mod 客户端上报状态，应能看到地图投影出现。
+
+当前默认连接地址：
+
+- `ws://127.0.0.1:8765/web-map/ws`
+
+### 配置面板说明
+
+- 开关类选项通常即时生效，不需要再次点击保存
+- 输入框类选项采用手动确认，避免边输入边触发重连
+- 连接设置分组使用“应用连接设置”，保存后会触发重连
+
+### 配置导入 / 导出
+
+- 支持导出当前配置为 JSON 文件
+- 导入时会校验兼容版本
+- 导入后的配置会统一经过归一化处理，缺失字段自动回落默认值，冗余字段自动忽略
+
+## 常见问题
+
+### 页面上没有任何投影
+
+- 先确认后端已启动，并且脚本连接的是 `/web-map/ws`
+- 再确认 Minecraft Mod 也连接到了同一个后端
+- 最后确认双方 `roomCode` 一致
+
+### 安装脚本后页面还是受 NodeMC 扩展影响
+
+- 这个脚本不负责屏蔽 `nodes` 扩展
+- 如果你是在 `map.nodemc.cc` 使用，可额外安装 [map-nodemc-plugin-blocker](https://github.com/MC-TeamViewer/map-nodemc-plugin-blocker)
+
+### 连接上了但看不到特定玩家或标记
+
+- 先检查对应玩家是否真的在上报
+- 再检查房间号和后端是否一致
+- 必要时用后端的 `/snapshot` 接口确认服务端当前状态
+
+## 开发与构建
+
+常用命令：
+
+```bash
+pnpm install
+pnpm dev
+pnpm build
+pnpm proto:generate
+```
+
+关键目录：
+
+- `src/index.ts`：脚本主入口
+- `src/network/`：WebSocket 与协议编解码
+- `src/ui/`：设置面板与页面交互
+- `src/meta.ts`：userscript 与协议元信息
+- `src/constants.ts`：默认配置与运行时常量
+
+## 协议 / 版本兼容
+
+当前版本基线：
+
+- userscript：`0.4.8`
+- 协议版本：`0.6.0`
+- 最低兼容协议版本：`0.6.0`
+
+共享 ProtoBuf 协议源位于：
+
+- `third_party/TeamViewRelay-Protocol/proto/teamviewer/v1/teamviewer.proto`
+
+本地 TS 协议代码生成命令：
+
+```bash
+pnpm proto:generate
+```
+
+子模块与协议版本：
+
+- 推荐使用 `git clone --recursive`
+- 已有仓库可执行 `git submodule update --init --recursive`
+- 当前依赖锁定在 `third_party/TeamViewRelay-Protocol` 的指定 commit，不会自动跟随远端更新
+
+升级协议版本的常规流程：
 
 ```bash
 git -C third_party/TeamViewRelay-Protocol fetch --tags
@@ -53,40 +167,3 @@ git add third_party/TeamViewRelay-Protocol
 pnpm proto:generate
 pnpm build
 ```
-
-- GitHub “Download ZIP” 不包含 submodule 内容，不是推荐的开发方式
-
-## 配置导入/导出
-
-- 在设置面板基础页新增「导出配置 / 导入配置」按钮。
-- 导出文件为 JSON，包含：配置内容、导出时间、兼容版本、程序版本等元信息。
-- 导入时会校验兼容版本（按 `LOCAL_PROGRAM_VERSION` 的 `major.minor`），只有同兼容版本允许导入。
-- 导入后会统一经过 `sanitizeConfig` 归一化，因此在同兼容版本内即使后续新增字段，也能保持导入可用（缺失字段自动回落默认值，冗余字段自动忽略）。
-
-## 设置交互策略
-
-- 开关类选项（checkbox）改为即时生效，无需点击保存。
-- 输入框类选项（文本/数字）采用手动确认：修改后显示“未保存”提示，并在对应分组点击保存后生效。
-- 连接设置分组使用“应用连接设置”，点击后会保存并触发重连，避免输入过程频繁重连。
-
-## 开发
-
-```bash
-pnpm install
-pnpm dev
-```
-
-## 打包
-
-```bash
-pnpm build
-```
-
-打包产物在 `dist/*.user.js`，将该文件导入 Tampermonkey 即可。
-
-## 安装方式
-首先安装 Tampermonkey 浏览器插件
-
-然后从Release页面下载对应版本，并导入安装脚本
-
-或访问 https://greasyfork.org/zh-CN/scripts/571542-teamviewrelay-%E5%9C%B0%E5%9B%BE%E6%8A%95%E5%BD%B1-squaremap%E7%89%88 安装脚本
