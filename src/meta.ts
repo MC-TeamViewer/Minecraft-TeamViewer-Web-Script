@@ -12,8 +12,8 @@ export const USERSCRIPT_META = {
     'http://map.fltown.cn/*',
   ] as const,
   'run-at': 'document-start' as const,
-  grant: ['unsafeWindow'] as const,
-  connect: ['*'] as const,
+  'inject-into': 'page' as const,
+  grant: 'none' as const,
 };
 
 export const PROTOCOL_META = {

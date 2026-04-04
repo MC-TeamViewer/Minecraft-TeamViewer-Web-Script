@@ -39,12 +39,10 @@ import { createWebMapWsClient, type SnapshotChangeSet } from './network/wsClient
 import { createMapProjection } from './core/mapProjection';
 import { createSettingsUi } from './ui/settingsUi';
 
-declare const unsafeWindow: Window | undefined;
-
 (function () {
   'use strict';
 
-  const PAGE = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+  const PAGE = window;
   const CONFIG = { ...DEFAULT_CONFIG };
 
   let latestSnapshot: Record<string, any> | null = null;

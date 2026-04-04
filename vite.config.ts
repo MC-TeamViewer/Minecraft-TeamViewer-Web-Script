@@ -16,8 +16,6 @@ export default defineConfig({
       userscript: {
         ...USERSCRIPT_META,
         match: [...USERSCRIPT_META.match],
-        grant: [...USERSCRIPT_META.grant],
-        connect: [...USERSCRIPT_META.connect],
       }
     })
   ],
