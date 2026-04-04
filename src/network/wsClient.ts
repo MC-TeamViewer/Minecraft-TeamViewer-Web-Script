@@ -584,6 +584,11 @@ export function createWebMapWsClient(deps: WsClientDeps) {
       emitStatus();
       return false;
     }
+    if (!wsConnected) {
+      lastErrorText = 'ws handshake not completed';
+      emitStatus();
+      return false;
+    }
     try {
       webMapWs.send(messageCodec.encode(message));
       return true;
@@ -693,6 +698,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     manualWsClose = false;
     pageUnloading = false;
     reconnectSuppressedByVersionIncompatibility = false;
+    wsConnected = false;
     serverProtocolVersion = null;
 
     const config = deps.getConfig();
@@ -710,7 +716,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     webMapWs = ws;
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
-      wsConnected = true;
+      wsConnected = false;
       lastErrorText = null;
       try {
         ws.send(messageCodec.encode(buildWebMapHandshake(config.ROOM_CODE)));
@@ -788,6 +794,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
             return;
           }
 
+          wsConnected = true;
           lastErrorText = null;
           emitStatus();
           return;
