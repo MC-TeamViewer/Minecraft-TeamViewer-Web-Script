@@ -67,6 +67,7 @@ type OverlayUiState = {
     SHOW_LABEL_TOWN_INFO: boolean;
     BLOCK_MAP_LEFT_RIGHT_CLICK: boolean;
     ENABLE_TACTICAL_MAP_MARKING: boolean;
+    ENABLE_FREE_WHEEL_ZOOM: boolean;
     TACTICAL_MARK_DEFAULT_TTL_SECONDS: string;
     BLOCK_MAP_HOVER_POPUP: boolean;
     SHOW_BATTLE_CHUNK_LAYER: boolean;
@@ -806,6 +807,7 @@ function formatDimensionBucket(item: {
     </div>
     <div class="n-card">
       <label class="n-check"><input v-model="state.form.ENABLE_TACTICAL_MAP_MARKING" @change="triggerAutoApply" id="nodemc-overlay-enable-tactical-marking" type="checkbox" />启用战术地图标记（右键空白处选择类型后落点，右键已有 waypoint 删除）</label>
+      <label class="n-check"><input v-model="state.form.ENABLE_FREE_WHEEL_ZOOM" @change="triggerAutoApply" id="nodemc-overlay-enable-free-wheel-zoom" type="checkbox" />启用扩展滚轮缩放（允许超出原网页缩放上下限）</label>
       <div class="n-row full-width">
         <label>战术标记默认有效期（秒，右键时可改为 long 长期）</label>
         <input v-model="state.form.TACTICAL_MARK_DEFAULT_TTL_SECONDS" @change="triggerAutoApply" id="nodemc-overlay-tactical-ttl" type="number" min="10" max="86400" step="10" />

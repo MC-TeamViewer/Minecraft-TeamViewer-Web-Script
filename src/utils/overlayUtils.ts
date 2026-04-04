@@ -162,6 +162,9 @@ export function sanitizeConfig(candidate: Record<string, unknown> | null | undef
   next.ENABLE_TACTICAL_MAP_MARKING = candidate.ENABLE_TACTICAL_MAP_MARKING === undefined
     ? DEFAULT_CONFIG.ENABLE_TACTICAL_MAP_MARKING
     : Boolean(candidate.ENABLE_TACTICAL_MAP_MARKING);
+  next.ENABLE_FREE_WHEEL_ZOOM = candidate.ENABLE_FREE_WHEEL_ZOOM === undefined
+    ? DEFAULT_CONFIG.ENABLE_FREE_WHEEL_ZOOM
+    : Boolean(candidate.ENABLE_FREE_WHEEL_ZOOM);
   const tacticalMarkTtlSeconds = Number(candidate.TACTICAL_MARK_DEFAULT_TTL_SECONDS);
   if (Number.isFinite(tacticalMarkTtlSeconds)) {
     next.TACTICAL_MARK_DEFAULT_TTL_SECONDS = Math.max(10, Math.min(86400, Math.round(tacticalMarkTtlSeconds)));

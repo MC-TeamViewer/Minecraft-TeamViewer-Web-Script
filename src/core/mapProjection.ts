@@ -41,6 +41,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const PAGE = deps.page;
   const CONFIG = deps.config;
   const GLOBAL_MAP_KEY_REGEX = /(map|leaflet|square)/i;
+  const FREE_WHEEL_MIN_ZOOM = -12;
+  const FREE_WHEEL_MAX_ZOOM_EXTRA = 24;
+  const FREE_WHEEL_ZOOM_PER_PIXEL = 1 / 320;
 
   let leafletRef: any = null;
   let capturedMap: any = null;
@@ -54,6 +57,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let lastApplyMode: 'full' | 'patch' | 'idle' = 'idle';
   let guardedMapContainer: HTMLElement | null = null;
   let hoverPopupBlockedContainer: HTMLElement | null = null;
+  let freeWheelZoomContainer: HTMLElement | null = null;
+  let freeWheelZoomMap: any = null;
   let tacticalMenuEl: HTMLElement | null = null;
   let tacticalMenuOutsideClickHandler: ((event: MouseEvent) => void) | null = null;
   let tacticalMenuEscHandler: ((event: KeyboardEvent) => void) | null = null;
@@ -250,6 +255,192 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function shouldEnableTacticalMapMarking() {
     return Boolean(CONFIG.ENABLE_TACTICAL_MAP_MARKING);
+  }
+
+  function shouldEnableFreeWheelZoom() {
+    return Boolean(CONFIG.ENABLE_FREE_WHEEL_ZOOM);
+  }
+
+  function getNativeZoomState(map: any) {
+    if (!map) return null;
+    if (!map.__nodemcNativeZoomState) {
+      map.__nodemcNativeZoomState = {
+        minZoom: Number.isFinite(map?.options?.minZoom) ? Number(map.options.minZoom) : null,
+        maxZoom: Number.isFinite(map?.options?.maxZoom) ? Number(map.options.maxZoom) : null,
+        zoomSnap: Number.isFinite(map?.options?.zoomSnap) ? Number(map.options.zoomSnap) : 1,
+        scrollWheelZoom: map?.options?.scrollWheelZoom === undefined ? true : map.options.scrollWheelZoom,
+      };
+    }
+    return map.__nodemcNativeZoomState;
+  }
+
+  function normalizeWheelDelta(event: WheelEvent) {
+    let deltaY = Number(event.deltaY) || 0;
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      deltaY *= 40;
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      deltaY *= Math.max(400, PAGE.innerHeight || 800);
+    }
+    return deltaY;
+  }
+
+  function clampZoomToMapBounds(map: any, zoom: number) {
+    let nextZoom = zoom;
+    const minZoom = Number(map?.getMinZoom?.());
+    const maxZoom = Number(map?.getMaxZoom?.());
+    if (Number.isFinite(minZoom)) {
+      nextZoom = Math.max(minZoom, nextZoom);
+    }
+    if (Number.isFinite(maxZoom)) {
+      nextZoom = Math.min(maxZoom, nextZoom);
+    }
+    return nextZoom;
+  }
+
+  function applyMapZoomBounds(map: any, minZoom: number | null, maxZoom: number | null) {
+    if (!map) return;
+    map.__nodemcApplyingFreeWheelBounds = true;
+    try {
+      if (Number.isFinite(minZoom) && typeof map.setMinZoom === 'function') {
+        map.setMinZoom(Number(minZoom));
+      }
+      if (Number.isFinite(maxZoom) && typeof map.setMaxZoom === 'function') {
+        map.setMaxZoom(Number(maxZoom));
+      }
+    } finally {
+      map.__nodemcApplyingFreeWheelBounds = false;
+    }
+  }
+
+  function syncMapZoomOptions(map: any) {
+    const nativeZoomState = getNativeZoomState(map);
+    if (!nativeZoomState || !map?.options) return;
+
+    if (shouldEnableFreeWheelZoom()) {
+      map.options.zoomSnap = 0;
+      map.options.scrollWheelZoom = false;
+      try { map.scrollWheelZoom?.disable?.(); } catch (_) {}
+      return;
+    }
+
+    map.options.zoomSnap = nativeZoomState.zoomSnap;
+    map.options.scrollWheelZoom = nativeZoomState.scrollWheelZoom;
+    try {
+      if (nativeZoomState.scrollWheelZoom === false) {
+        map.scrollWheelZoom?.disable?.();
+      } else {
+        map.scrollWheelZoom?.enable?.();
+      }
+    } catch (_) {}
+  }
+
+  function detachFreeWheelZoomHandler() {
+    if (!freeWheelZoomContainer) {
+      freeWheelZoomMap = null;
+      return;
+    }
+    freeWheelZoomContainer.removeEventListener('wheel', onFreeWheelZoom);
+    freeWheelZoomContainer = null;
+    freeWheelZoomMap = null;
+  }
+
+  function onFreeWheelZoom(event: WheelEvent) {
+    const map = freeWheelZoomMap;
+    if (!map || !shouldEnableFreeWheelZoom()) return;
+    if (event.ctrlKey || event.metaKey) return;
+    if (!map._loaded) return;
+
+    const latLng = typeof map.mouseEventToLatLng === 'function' ? map.mouseEventToLatLng(event) : null;
+    if (!latLng) return;
+
+    const currentZoom = Number(map.getZoom?.());
+    if (!Number.isFinite(currentZoom)) return;
+
+    const deltaY = normalizeWheelDelta(event);
+    if (!Number.isFinite(deltaY) || deltaY === 0) return;
+
+    const zoomOffset = Math.max(-4, Math.min(4, -deltaY * FREE_WHEEL_ZOOM_PER_PIXEL));
+    if (!Number.isFinite(zoomOffset) || Math.abs(zoomOffset) < 0.0001) return;
+
+    const targetZoom = clampZoomToMapBounds(map, currentZoom + zoomOffset);
+    if (Math.abs(targetZoom - currentZoom) < 0.0001) return;
+
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
+
+    try {
+      if (typeof map.setZoomAround === 'function') {
+        map.setZoomAround(latLng, targetZoom, { animate: false });
+      } else if (typeof map.setZoom === 'function') {
+        map.setZoom(targetZoom, { animate: false });
+      }
+    } catch (_) {}
+  }
+
+  function ensureMapZoomController(mapOverride: any = null) {
+    const map = mapOverride || capturedMap || findMapByDom();
+    const container = map && map._container instanceof HTMLElement ? map._container : null;
+    if (!map || !container || !container.isConnected) {
+      detachFreeWheelZoomHandler();
+      return;
+    }
+
+    const nativeZoomState = getNativeZoomState(map);
+    if (!nativeZoomState) {
+      detachFreeWheelZoomHandler();
+      return;
+    }
+
+    syncMapZoomOptions(map);
+
+    const targetMinZoom = shouldEnableFreeWheelZoom()
+      ? FREE_WHEEL_MIN_ZOOM
+      : (Number.isFinite(nativeZoomState.minZoom) ? Number(nativeZoomState.minZoom) : null);
+    const targetMaxZoom = shouldEnableFreeWheelZoom()
+      ? (Number.isFinite(nativeZoomState.maxZoom) ? Number(nativeZoomState.maxZoom) + FREE_WHEEL_MAX_ZOOM_EXTRA : null)
+      : (Number.isFinite(nativeZoomState.maxZoom) ? Number(nativeZoomState.maxZoom) : null);
+
+    applyMapZoomBounds(map, targetMinZoom, targetMaxZoom);
+
+    if (shouldEnableFreeWheelZoom()) {
+      if (freeWheelZoomContainer !== container || freeWheelZoomMap !== map) {
+        detachFreeWheelZoomHandler();
+        freeWheelZoomContainer = container;
+        freeWheelZoomMap = map;
+        freeWheelZoomContainer.addEventListener('wheel', onFreeWheelZoom, { passive: false });
+      }
+      return;
+    }
+
+    detachFreeWheelZoomHandler();
+
+    const currentZoom = Number(map.getZoom?.());
+    if (!Number.isFinite(currentZoom) || typeof map.setZoom !== 'function') return;
+
+    let clampedZoom = currentZoom;
+    if (Number.isFinite(nativeZoomState.minZoom)) {
+      clampedZoom = Math.max(Number(nativeZoomState.minZoom), clampedZoom);
+    }
+    if (Number.isFinite(nativeZoomState.maxZoom)) {
+      clampedZoom = Math.min(Number(nativeZoomState.maxZoom), clampedZoom);
+    }
+    clampedZoom = Math.round(clampedZoom);
+    if (Number.isFinite(nativeZoomState.minZoom)) {
+      clampedZoom = Math.max(Number(nativeZoomState.minZoom), clampedZoom);
+    }
+    if (Number.isFinite(nativeZoomState.maxZoom)) {
+      clampedZoom = Math.min(Number(nativeZoomState.maxZoom), clampedZoom);
+    }
+    if (Math.abs(clampedZoom - currentZoom) < 0.0001) return;
+
+    try {
+      map.setZoom(clampedZoom, { animate: false });
+    } catch (_) {}
   }
 
   function getDefaultTacticalTtlSeconds() {
@@ -793,8 +984,12 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (!isLeafletMapCandidate(value)) return null;
     const changed = capturedMap !== value;
     capturedMap = value;
+    getNativeZoomState(value);
     attachMapReadyReplay(value);
     attachMapInteractionReplay(value);
+    if (!value.__nodemcApplyingFreeWheelBounds) {
+      ensureMapZoomController(value);
+    }
     if (changed) {
       scheduleSnapshotReplay();
       emitDebugStateChanged();
@@ -812,6 +1007,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const originalInitialize = leafletObj.Map.prototype.initialize;
     leafletObj.Map.prototype.initialize = function (...args: any[]) {
       captureMap(this);
+      syncMapZoomOptions(this);
       return originalInitialize.apply(this, args);
     };
 
@@ -819,7 +1015,10 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (typeof originalSetView === 'function') {
       leafletObj.Map.prototype.setView = function (...args: any[]) {
         captureMap(this);
-        return originalSetView.apply(this, args);
+        syncMapZoomOptions(this);
+        const result = originalSetView.apply(this, args);
+        ensureMapZoomController(this);
+        return result;
       };
     }
 
@@ -827,6 +1026,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (typeof originalPanTo === 'function') {
       leafletObj.Map.prototype.panTo = function (...args: any[]) {
         captureMap(this);
+        ensureMapZoomController(this);
         return originalPanTo.apply(this, args);
       };
     }
@@ -835,7 +1035,38 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (typeof originalFitBounds === 'function') {
       leafletObj.Map.prototype.fitBounds = function (...args: any[]) {
         captureMap(this);
+        ensureMapZoomController(this);
         return originalFitBounds.apply(this, args);
+      };
+    }
+
+    const originalSetMinZoom = leafletObj.Map.prototype.setMinZoom;
+    if (typeof originalSetMinZoom === 'function') {
+      leafletObj.Map.prototype.setMinZoom = function (...args: any[]) {
+        captureMap(this);
+        const result = originalSetMinZoom.apply(this, args);
+        const nativeZoomState = getNativeZoomState(this);
+        if (!this.__nodemcApplyingFreeWheelBounds && nativeZoomState) {
+          const nextMinZoom = Number(args[0]);
+          nativeZoomState.minZoom = Number.isFinite(nextMinZoom) ? nextMinZoom : null;
+          ensureMapZoomController(this);
+        }
+        return result;
+      };
+    }
+
+    const originalSetMaxZoom = leafletObj.Map.prototype.setMaxZoom;
+    if (typeof originalSetMaxZoom === 'function') {
+      leafletObj.Map.prototype.setMaxZoom = function (...args: any[]) {
+        captureMap(this);
+        const result = originalSetMaxZoom.apply(this, args);
+        const nativeZoomState = getNativeZoomState(this);
+        if (!this.__nodemcApplyingFreeWheelBounds && nativeZoomState) {
+          const nextMaxZoom = Number(args[0]);
+          nativeZoomState.maxZoom = Number.isFinite(nextMaxZoom) ? nextMaxZoom : null;
+          ensureMapZoomController(this);
+        }
+        return result;
       };
     }
   }
@@ -2474,6 +2705,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function isMapReady() {
     const map = capturedMap || findMapByDom();
+    ensureMapZoomController(map);
     ensureMapInteractionGuard();
     attachMapInteractionReplay(map);
     if (!map || !leafletRef || !map._loaded) {
@@ -2493,6 +2725,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (!snapshot) return false;
     ensureOverlayStyles();
     const map = capturedMap || findMapByDom();
+    ensureMapZoomController(map);
     ensureMapInteractionGuard();
     attachMapInteractionReplay(map);
     if (!map || !leafletRef || !map._loaded) return false;
@@ -2574,6 +2807,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
   function cleanup() {
     closeTacticalMenu();
+    detachFreeWheelZoomHandler();
     detachMapInteractionGuard();
     detachMapHoverPopupBlock();
 
@@ -2630,6 +2864,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     ensureOverlayStyles,
     installLeafletHook,
     findMapByDom,
+    ensureMapZoomController,
     ensureMapInteractionGuard,
     isMapReady,
     applySnapshotUpdate,

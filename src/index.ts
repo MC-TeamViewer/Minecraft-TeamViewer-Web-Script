@@ -1234,6 +1234,7 @@ import { createSettingsUi } from './ui/settingsUi';
       });
     }
     saveConfigToStorage();
+    mapProjection.ensureMapZoomController();
     mapProjection.ensureMapInteractionGuard();
     mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
     updateUiStatus();
@@ -1337,6 +1338,7 @@ import { createSettingsUi } from './ui/settingsUi';
       rebuildDerivedPlayersForCurrentState();
       saveConfigToStorage();
       settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
+      mapProjection.ensureMapZoomController();
       mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
       flushVisiblePlayerUi({
         forceSelector: settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark',
@@ -1567,6 +1569,7 @@ import { createSettingsUi } from './ui/settingsUi';
 
   function initOverlay() {
     mapProjection.ensureOverlayStyles();
+    mapProjection.ensureMapZoomController();
     mapProjection.ensureMapInteractionGuard();
     mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
     updateUiStatus({ recomputeDimensionOptions: true, recomputeDebug: true });
