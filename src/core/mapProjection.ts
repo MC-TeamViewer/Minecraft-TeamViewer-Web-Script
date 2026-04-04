@@ -59,14 +59,28 @@ export function createMapProjection(deps: MapProjectionDeps) {
   let tacticalMenuEscHandler: ((event: KeyboardEvent) => void) | null = null;
   let tacticalPreviewMarker: any | null = null;
   const markersById = new Map<string, any>();
+  const markerGeometryMemoById = new Map<string, string>();
   const markerRenderMemoById = new Map<string, string>();
   const waypointsById = new Map<string, any>();
+  const waypointGeometryMemoById = new Map<string, string>();
   const waypointRenderMemoById = new Map<string, string>();
   const battleChunkLayersById = new Map<string, any>();
+  const battleChunkGeometryMemoById = new Map<string, string>();
   const battleChunkRenderMemoById = new Map<string, string>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
   const reporterEffectsById = new Map<string, { vision: ReporterEffectEntry | null; chunkArea: ReporterEffectEntry | null }>();
   const reporterEffectLayersByStyle = new Map<string, any>();
+  const renderCounters = {
+    markerPositionOnlyUpdates: 0,
+    markerVisualUpdates: 0,
+    markerRecreates: 0,
+    waypointPositionOnlyUpdates: 0,
+    waypointVisualUpdates: 0,
+    waypointRecreates: 0,
+    battleChunkGeometryUpdates: 0,
+    battleChunkVisualUpdates: 0,
+    battleChunkRecreates: 0,
+  };
 
   function isDebugEnabled() {
     return typeof deps.isDebugEnabled === 'function' ? Boolean(deps.isDebugEnabled()) : true;
@@ -79,6 +93,39 @@ export function createMapProjection(deps: MapProjectionDeps) {
     try {
       deps.onDebugStateChanged?.();
     } catch (_) {}
+  }
+
+  function buildLatLngMemo(latLng: any) {
+    return [
+      Number(latLng?.lat || 0).toFixed(3),
+      Number(latLng?.lng || 0).toFixed(3),
+    ].join('|');
+  }
+
+  function buildMarkerVisualMemo(zIndexOffset: number, html: string) {
+    return [
+      zIndexOffset,
+      html,
+    ].join('|');
+  }
+
+  function buildBattleChunkGeometryMemo(chunkX: number, chunkZ: number) {
+    return [
+      Math.floor(chunkX),
+      Math.floor(chunkZ),
+    ].join('|');
+  }
+
+  function buildBattleChunkVisualMemo(renderMode: string, style: Record<string, unknown>, tooltipHtml: string) {
+    return [
+      renderMode,
+      String(style.color || ''),
+      String(style.weight || ''),
+      String(style.opacity || ''),
+      String(style.fillColor || ''),
+      String(style.fillOpacity || ''),
+      tooltipHtml,
+    ].join('|');
   }
 
   function scheduleSnapshotReplay() {
@@ -1444,45 +1491,56 @@ export function createMapProjection(deps: MapProjectionDeps) {
       Boolean(payload.isReporter),
       Boolean(payload.isRiding)
     );
-    const markerMemo = [
-      Number(latLng?.lat || 0).toFixed(3),
-      Number(latLng?.lng || 0).toFixed(3),
-      zIndexOffset,
-      html,
-    ].join('|');
+    const geometryMemo = buildLatLngMemo(latLng);
+    const visualMemo = buildMarkerVisualMemo(zIndexOffset, html);
 
     if (!html) {
       if (existing) {
         existing.remove();
         markersById.delete(playerId);
+        markerGeometryMemoById.delete(playerId);
         markerRenderMemoById.delete(playerId);
       }
       return;
     }
 
     if (existing) {
-      if (markerRenderMemoById.get(playerId) === markerMemo) {
+      const geometryChanged = markerGeometryMemoById.get(playerId) !== geometryMemo;
+      const visualChanged = markerRenderMemoById.get(playerId) !== visualMemo;
+      if (!geometryChanged && !visualChanged) {
         return;
       }
       try {
-        existing.setLatLng(latLng);
-        if (typeof existing.setZIndexOffset === 'function') {
-          existing.setZIndexOffset(zIndexOffset);
+        if (geometryChanged) {
+          existing.setLatLng(latLng);
         }
-        existing.setIcon(
-          leafletRef.divIcon({
-            className: '',
-            html,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0],
-          })
-        );
-        markerRenderMemoById.set(playerId, markerMemo);
+        if (visualChanged) {
+          if (typeof existing.setZIndexOffset === 'function') {
+            existing.setZIndexOffset(zIndexOffset);
+          }
+          existing.setIcon(
+            leafletRef.divIcon({
+              className: '',
+              html,
+              iconSize: [0, 0],
+              iconAnchor: [0, 0],
+            })
+          );
+        }
+        markerGeometryMemoById.set(playerId, geometryMemo);
+        markerRenderMemoById.set(playerId, visualMemo);
+        if (visualChanged) {
+          renderCounters.markerVisualUpdates += 1;
+        } else if (geometryChanged) {
+          renderCounters.markerPositionOnlyUpdates += 1;
+        }
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         try { markersById.delete(playerId); } catch (_) {}
+        markerGeometryMemoById.delete(playerId);
         markerRenderMemoById.delete(playerId);
+        renderCounters.markerRecreates += 1;
       }
     }
 
@@ -1500,7 +1558,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     marker.addTo(map);
     markersById.set(playerId, marker);
-    markerRenderMemoById.set(playerId, markerMemo);
+    markerGeometryMemoById.set(playerId, geometryMemo);
+    markerRenderMemoById.set(playerId, visualMemo);
   }
 
   function upsertReporterEffects(map: any, playerId: string, payload: any, isReporter: boolean) {
@@ -1613,40 +1672,51 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const latLng = worldToLatLng(map, payload.x, payload.z);
     const zIndexOffset = getWaypointZIndexOffset();
     const html = buildWaypointHtml(payload.label || payload.name || waypointId, payload.x, payload.z, payload);
-    const waypointMemo = [
-      Number(latLng?.lat || 0).toFixed(3),
-      Number(latLng?.lng || 0).toFixed(3),
-      zIndexOffset,
-      html,
-    ].join('|');
+    const geometryMemo = buildLatLngMemo(latLng);
+    const visualMemo = buildMarkerVisualMemo(zIndexOffset, html);
 
     if (!html) {
       if (existing) {
         existing.remove();
         waypointsById.delete(waypointId);
+        waypointGeometryMemoById.delete(waypointId);
         waypointRenderMemoById.delete(waypointId);
       }
       return;
     }
 
     if (existing) {
-      if (waypointRenderMemoById.get(waypointId) === waypointMemo) {
+      const geometryChanged = waypointGeometryMemoById.get(waypointId) !== geometryMemo;
+      const visualChanged = waypointRenderMemoById.get(waypointId) !== visualMemo;
+      if (!geometryChanged && !visualChanged) {
         return;
       }
       try {
-        existing.setLatLng(latLng);
-        if (typeof existing.setZIndexOffset === 'function') {
-          existing.setZIndexOffset(zIndexOffset);
+        if (geometryChanged) {
+          existing.setLatLng(latLng);
         }
-        existing.setIcon(
-          leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
-        );
-        waypointRenderMemoById.set(waypointId, waypointMemo);
+        if (visualChanged) {
+          if (typeof existing.setZIndexOffset === 'function') {
+            existing.setZIndexOffset(zIndexOffset);
+          }
+          existing.setIcon(
+            leafletRef.divIcon({ className: '', html, iconSize: [0, 0], iconAnchor: [0, 0] })
+          );
+        }
+        waypointGeometryMemoById.set(waypointId, geometryMemo);
+        waypointRenderMemoById.set(waypointId, visualMemo);
+        if (visualChanged) {
+          renderCounters.waypointVisualUpdates += 1;
+        } else if (geometryChanged) {
+          renderCounters.waypointPositionOnlyUpdates += 1;
+        }
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         try { waypointsById.delete(waypointId); } catch (_) {}
+        waypointGeometryMemoById.delete(waypointId);
         waypointRenderMemoById.delete(waypointId);
+        renderCounters.waypointRecreates += 1;
       }
     }
 
@@ -1659,7 +1729,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
 
     marker.addTo(map);
     waypointsById.set(waypointId, marker);
-    waypointRenderMemoById.set(waypointId, waypointMemo);
+    waypointGeometryMemoById.set(waypointId, geometryMemo);
+    waypointRenderMemoById.set(waypointId, visualMemo);
   }
 
   function upsertBattleChunk(map: any, chunkId: string, payload: any) {
@@ -1668,6 +1739,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
       }
       return;
@@ -1685,6 +1757,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
       }
       return;
@@ -1695,38 +1768,43 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const existing = battleChunkLayersById.get(chunkId);
     const payloadWithRenderMode = { ...payload, renderMode };
     const tooltipHtml = shouldShowBattleChunkDebug() ? buildBattleChunkTooltip(chunkId, payloadWithRenderMode) : '';
-    const battleChunkMemo = [
-      Math.floor(chunkX),
-      Math.floor(chunkZ),
-      renderMode,
-      String(style.color || ''),
-      String(style.weight || ''),
-      String(style.opacity || ''),
-      String(style.fillColor || ''),
-      String(style.fillOpacity || ''),
-      tooltipHtml,
-    ].join('|');
+    const geometryMemo = buildBattleChunkGeometryMemo(chunkX, chunkZ);
+    const visualMemo = buildBattleChunkVisualMemo(renderMode, style, tooltipHtml);
 
     if (existing) {
-      if (battleChunkRenderMemoById.get(chunkId) === battleChunkMemo) {
+      const geometryChanged = battleChunkGeometryMemoById.get(chunkId) !== geometryMemo;
+      const visualChanged = battleChunkRenderMemoById.get(chunkId) !== visualMemo;
+      if (!geometryChanged && !visualChanged) {
         return;
       }
       try {
-        existing.setBounds(bounds);
-        existing.setStyle(style);
-        if (shouldShowBattleChunkDebug()) {
-          if (typeof existing.bindTooltip === 'function') {
-            existing.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
-          }
-        } else if (typeof existing.unbindTooltip === 'function') {
-          existing.unbindTooltip();
+        if (geometryChanged) {
+          existing.setBounds(bounds);
         }
-        battleChunkRenderMemoById.set(chunkId, battleChunkMemo);
+        if (visualChanged) {
+          existing.setStyle(style);
+          if (shouldShowBattleChunkDebug()) {
+            if (typeof existing.bindTooltip === 'function') {
+              existing.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
+            }
+          } else if (typeof existing.unbindTooltip === 'function') {
+            existing.unbindTooltip();
+          }
+        }
+        battleChunkGeometryMemoById.set(chunkId, geometryMemo);
+        battleChunkRenderMemoById.set(chunkId, visualMemo);
+        if (visualChanged) {
+          renderCounters.battleChunkVisualUpdates += 1;
+        } else if (geometryChanged) {
+          renderCounters.battleChunkGeometryUpdates += 1;
+        }
         return;
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
+        renderCounters.battleChunkRecreates += 1;
       }
     }
 
@@ -1736,7 +1814,8 @@ export function createMapProjection(deps: MapProjectionDeps) {
     }
     layer.addTo(map);
     battleChunkLayersById.set(chunkId, layer);
-    battleChunkRenderMemoById.set(chunkId, battleChunkMemo);
+    battleChunkGeometryMemoById.set(chunkId, geometryMemo);
+    battleChunkRenderMemoById.set(chunkId, visualMemo);
   }
 
   function removeMissingMarkers(nextIds: Set<string>) {
@@ -1744,6 +1823,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(playerId)) continue;
       marker.remove();
       markersById.delete(playerId);
+      markerGeometryMemoById.delete(playerId);
       markerRenderMemoById.delete(playerId);
     }
   }
@@ -1753,6 +1833,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(wpId)) continue;
       try { marker.remove(); } catch (_) {}
       waypointsById.delete(wpId);
+      waypointGeometryMemoById.delete(wpId);
       waypointRenderMemoById.delete(wpId);
       trackedWaypointPositions.delete(wpId);
     }
@@ -1763,6 +1844,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(chunkId)) continue;
       try { layer.remove(); } catch (_) {}
       battleChunkLayersById.delete(chunkId);
+      battleChunkGeometryMemoById.delete(chunkId);
       battleChunkRenderMemoById.delete(chunkId);
     }
   }
@@ -1772,6 +1854,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { layer.remove(); } catch (_) {}
     }
     battleChunkLayersById.clear();
+    battleChunkGeometryMemoById.clear();
     battleChunkRenderMemoById.clear();
   }
 
@@ -2090,6 +2173,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     if (!existing) return;
     try { existing.remove(); } catch (_) {}
     markersById.delete(markerId);
+    markerGeometryMemoById.delete(markerId);
     markerRenderMemoById.delete(markerId);
   }
 
@@ -2099,6 +2183,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { existing.remove(); } catch (_) {}
     }
     waypointsById.delete(waypointId);
+    waypointGeometryMemoById.delete(waypointId);
     waypointRenderMemoById.delete(waypointId);
     trackedWaypointPositions.delete(waypointId);
   }
@@ -2109,6 +2194,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { existing.remove(); } catch (_) {}
     }
     battleChunkLayersById.delete(chunkId);
+    battleChunkGeometryMemoById.delete(chunkId);
     battleChunkRenderMemoById.delete(chunkId);
   }
 
@@ -2474,6 +2560,15 @@ export function createMapProjection(deps: MapProjectionDeps) {
       markers: markersById.size,
       waypoints: waypointsById.size,
       battleChunks: battleChunkLayersById.size,
+      markerPositionOnlyUpdates: renderCounters.markerPositionOnlyUpdates,
+      markerVisualUpdates: renderCounters.markerVisualUpdates,
+      markerRecreates: renderCounters.markerRecreates,
+      waypointPositionOnlyUpdates: renderCounters.waypointPositionOnlyUpdates,
+      waypointVisualUpdates: renderCounters.waypointVisualUpdates,
+      waypointRecreates: renderCounters.waypointRecreates,
+      battleChunkGeometryUpdates: renderCounters.battleChunkGeometryUpdates,
+      battleChunkVisualUpdates: renderCounters.battleChunkVisualUpdates,
+      battleChunkRecreates: renderCounters.battleChunkRecreates,
     };
   }
 
@@ -2486,12 +2581,14 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { m.remove(); } catch (_) {}
     }
     markersById.clear();
+    markerGeometryMemoById.clear();
     markerRenderMemoById.clear();
 
     for (const m of waypointsById.values()) {
       try { m.remove(); } catch (_) {}
     }
     waypointsById.clear();
+    waypointGeometryMemoById.clear();
     waypointRenderMemoById.clear();
 
     clearBattleChunkLayers();
@@ -2517,6 +2614,15 @@ export function createMapProjection(deps: MapProjectionDeps) {
     interactionReplayDroppedCount = 0;
     lastApplyDurationMs = 0;
     lastApplyMode = 'idle';
+    renderCounters.markerPositionOnlyUpdates = 0;
+    renderCounters.markerVisualUpdates = 0;
+    renderCounters.markerRecreates = 0;
+    renderCounters.waypointPositionOnlyUpdates = 0;
+    renderCounters.waypointVisualUpdates = 0;
+    renderCounters.waypointRecreates = 0;
+    renderCounters.battleChunkGeometryUpdates = 0;
+    renderCounters.battleChunkVisualUpdates = 0;
+    renderCounters.battleChunkRecreates = 0;
     emitDebugStateChanged();
   }
 

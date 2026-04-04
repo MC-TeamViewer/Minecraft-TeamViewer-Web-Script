@@ -65,6 +65,51 @@ import { createSettingsUi } from './ui/settingsUi';
   let pendingUiDebugRefresh = false;
   let cachedDimensionOptions = getOverviewDimensionOptions(null, CONFIG.TARGET_DIMENSION);
   let lastUiRefreshDurationMs = 0;
+  let lastPlayerDeriveMs = 0;
+  let lastPlayerUiFlushMs = 0;
+  let onlinePlayerCount = 0;
+  let visibleMapPlayerCount = 0;
+  let playerSelectorDirty = true;
+  let mapPlayerListDirty = true;
+  let cachedFriendlyTags: string[] = [];
+  let cachedEnemyTags: string[] = [];
+  let cachedAutoTeamTagsKey = '';
+
+  type TabPlayerInfo = {
+    name: string;
+    teamText: string;
+    teamColor: string | null;
+    autoName: string | null;
+    displayNameRaw: string;
+    prefixedName: string;
+    matchedBy: 'uuid';
+  };
+
+  type PlayerSelectorRow = {
+    playerId: string;
+    playerName: string;
+    displayLabel: string;
+    teamColor: string | null;
+  };
+
+  type MapPlayerRow = {
+    playerId: string;
+    playerName: string;
+    team: string;
+    teamColor: string;
+    town: string;
+    townColor: string;
+    health: string;
+    armor: string;
+    x: number;
+    z: number;
+  };
+
+  const tabPlayerIndexById = new Map<string, TabPlayerInfo>();
+  const playerSelectorRowById = new Map<string, PlayerSelectorRow>();
+  const mapPlayerRowById = new Map<string, MapPlayerRow>();
+  let cachedPlayerSelectorRows: PlayerSelectorRow[] | null = null;
+  let cachedMapPlayerRows: Array<Omit<MapPlayerRow, 'x' | 'z'>> | null = null;
 
   let wsClient: ReturnType<typeof createWebMapWsClient> | null = null;
 
@@ -87,26 +132,49 @@ import { createSettingsUi } from './ui/settingsUi';
     return { team, color, label, source };
   }
 
+  function getAutoTeamTagsCacheKey() {
+    return [
+      String(Boolean(CONFIG.AUTO_TEAM_FROM_NAME)),
+      String(CONFIG.FRIENDLY_TAGS || ''),
+      String(CONFIG.ENEMY_TAGS || ''),
+    ].join('\n');
+  }
+
+  function invalidateAutoTeamTagCache() {
+    cachedAutoTeamTagsKey = '';
+    cachedFriendlyTags = [];
+    cachedEnemyTags = [];
+  }
+
+  function ensureParsedAutoTeamTags() {
+    const nextKey = getAutoTeamTagsCacheKey();
+    if (nextKey === cachedAutoTeamTagsKey) {
+      return;
+    }
+    cachedAutoTeamTagsKey = nextKey;
+    cachedFriendlyTags = parseTagList(CONFIG.FRIENDLY_TAGS);
+    cachedEnemyTags = parseTagList(CONFIG.ENEMY_TAGS);
+  }
+
   function autoTeamFromName(nameText: string) {
     if (!CONFIG.AUTO_TEAM_FROM_NAME) return null;
     const name = String(nameText || '');
     if (!name) return null;
 
-    const friendlyTags = parseTagList(CONFIG.FRIENDLY_TAGS);
-    const enemyTags = parseTagList(CONFIG.ENEMY_TAGS);
+    ensureParsedAutoTeamTags();
 
     // 优先从 displayName 中提取方括号内的城镇名（如 [喀布尔]）进行标签匹配
     const townNameMatch = name.match(/\[([^\]]+)\]/);
     if (townNameMatch) {
       const townName = townNameMatch[1];
-      if (friendlyTags.some((tag) => townName.includes(tag))) {
+      if (cachedFriendlyTags.some((tag) => townName.includes(tag))) {
         return {
           team: 'friendly',
           color: getConfiguredTeamColor('friendly', CONFIG),
           label: '',
         };
       }
-      if (enemyTags.some((tag) => townName.includes(tag))) {
+      if (cachedEnemyTags.some((tag) => townName.includes(tag))) {
         return {
           team: 'enemy',
           color: getConfiguredTeamColor('enemy', CONFIG),
@@ -116,14 +184,14 @@ import { createSettingsUi } from './ui/settingsUi';
     }
 
     // 如果没有城镇名，则使用完整名称进行匹配（兼容旧逻辑）
-    if (friendlyTags.some((tag) => name.includes(tag))) {
+    if (cachedFriendlyTags.some((tag) => name.includes(tag))) {
       return {
         team: 'friendly',
         color: getConfiguredTeamColor('friendly', CONFIG),
         label: '',
       };
     }
-    if (enemyTags.some((tag) => name.includes(tag))) {
+    if (cachedEnemyTags.some((tag) => name.includes(tag))) {
       return {
         team: 'enemy',
         color: getConfiguredTeamColor('enemy', CONFIG),
@@ -133,40 +201,83 @@ import { createSettingsUi } from './ui/settingsUi';
     return null;
   }
 
-  function getTabPlayerInfo(playerId: string) {
+  function composeDisplayLabel(rawLabel: string, rawPlayerName: string) {
+    const label = String(rawLabel || '').trim();
+    const playerName = String(rawPlayerName || '').trim();
+    if (!label) return playerName;
+    if (!playerName) return label;
+    if (label === playerName) return label;
+    if (label.includes(playerName)) return label;
+    return `${label} ${playerName}`;
+  }
+
+  function getSnapshotPlayers() {
+    return latestSnapshot && typeof latestSnapshot === 'object' && latestSnapshot.players && typeof latestSnapshot.players === 'object'
+      ? latestSnapshot.players
+      : null;
+  }
+
+  function getSnapshotPlayerData(playerId: string) {
+    const players = getSnapshotPlayers();
+    if (!players) return null;
+    return getPlayerDataNode(players[String(playerId)]) || null;
+  }
+
+  function createTabPlayerInfoFromNode(node: any): TabPlayerInfo | null {
+    if (!node || typeof node !== 'object') return null;
+    const playerId = String(node.uuid || node.id || '').trim();
+    if (!playerId) return null;
+
+    const prefixedName = String(node.prefixedName || '').trim();
+    const displayNameRaw = String(node.displayName || '').trim();
+    const name = String(node.name || '').trim();
+    const parsedDisplay = parseMcDisplayName(displayNameRaw || prefixedName);
+    const teamText = parsedDisplay.teamText || (prefixedName ? `[${prefixedName}]` : '');
+
+    return {
+      name,
+      teamText,
+      teamColor: parsedDisplay.color,
+      autoName: name || parsedDisplay.plain || prefixedName || null,
+      displayNameRaw,
+      prefixedName,
+      matchedBy: 'uuid',
+    };
+  }
+
+  function mergeTabPlayerInfo(previous: TabPlayerInfo, next: TabPlayerInfo): TabPlayerInfo {
+    return {
+      name: previous.name || next.name,
+      teamText: previous.teamText || next.teamText,
+      teamColor: previous.teamColor || next.teamColor,
+      autoName: previous.autoName || next.autoName,
+      displayNameRaw: previous.displayNameRaw || next.displayNameRaw,
+      prefixedName: previous.prefixedName || next.prefixedName,
+      matchedBy: 'uuid',
+    };
+  }
+
+  function rebuildTabPlayerIndex() {
+    tabPlayerIndexById.clear();
     const tabState = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.tabState : null;
     const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
-    if (!reports) return null;
+    if (!reports) return;
 
     for (const report of Object.values(reports)) {
       if (!report || typeof report !== 'object') continue;
       const players = Array.isArray(report.players) ? report.players : [];
       for (const node of players) {
-        if (!node || typeof node !== 'object') continue;
-        const nodeId = String(node.uuid || node.id || '').trim();
-        if (!nodeId || nodeId !== String(playerId)) continue;
-
-        const prefixedName = String(node.prefixedName || '').trim();
-        const displayNameRaw = String(node.displayName || '').trim();
-        const name = String(node.name || '').trim();
-        const parsedDisplay = parseMcDisplayName(displayNameRaw || prefixedName);
-        const teamText = parsedDisplay.teamText || (prefixedName ? `[${prefixedName}]` : '');
-
-        return {
-          name,
-          teamText,
-          teamColor: parsedDisplay.color,
-          // Prefer the canonical player name from TAB data. Older payloads may only
-          // provide prefixed/display text, so keep those as a fallback.
-          autoName: name || parsedDisplay.plain || prefixedName || null,
-          displayNameRaw,
-          prefixedName,
-          matchedBy: 'uuid',
-        };
+        const nextInfo = createTabPlayerInfoFromNode(node);
+        if (!nextInfo) continue;
+        const playerId = String(node.uuid || node.id || '').trim();
+        const previous = tabPlayerIndexById.get(playerId);
+        tabPlayerIndexById.set(playerId, previous ? mergeTabPlayerInfo(previous, nextInfo) : nextInfo);
       }
     }
+  }
 
-    return null;
+  function getTabPlayerInfo(playerId: string) {
+    return tabPlayerIndexById.get(String(playerId || '').trim()) || null;
   }
 
   function getTabPlayerName(playerId: string) {
@@ -175,21 +286,7 @@ import { createSettingsUi } from './ui/settingsUi';
   }
 
   function getTabOnlinePlayerCount() {
-    const tabState = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.tabState : null;
-    const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
-    if (!reports) return 0;
-
-    const ids = new Set<string>();
-    for (const report of Object.values(reports)) {
-      if (!report || typeof report !== 'object') continue;
-      const players = Array.isArray(report.players) ? report.players : [];
-      for (const node of players) {
-        if (!node || typeof node !== 'object') continue;
-        const playerId = String(node.uuid || node.id || node.name || '').trim();
-        if (playerId) ids.add(playerId);
-      }
-    }
-    return ids.size;
+    return tabPlayerIndexById.size;
   }
 
   function getSnapshotScopeCounts(snapshot: Record<string, any> | null) {
@@ -306,16 +403,6 @@ import { createSettingsUi } from './ui/settingsUi';
     return Boolean(CONFIG.DEBUG_PANEL_ENABLED);
   }
 
-  function shouldRefreshPlayerListForChange(changeSet: SnapshotChangeSet | null) {
-    if (!changeSet) return true;
-    return (
-      changeSet.kind === 'full' ||
-      changeSet.dirtyScopes.players ||
-      changeSet.dirtyScopes.playerMarks ||
-      changeSet.dirtyScopes.tabState
-    );
-  }
-
   function updateDimensionOptionsCache() {
     cachedDimensionOptions = getOverviewDimensionOptions(
       latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot : null,
@@ -353,9 +440,23 @@ import { createSettingsUi } from './ui/settingsUi';
         lastOverlayApplyMs: 0,
         lastOverlayApplyMode: 'idle',
         lastUiRefreshMs: lastUiRefreshDurationMs,
+        lastPlayerDeriveMs,
+        lastPlayerUiFlushMs,
+        tabIndexedPlayers: tabPlayerIndexById.size,
+        playerSelectorDirty,
+        mapPlayerListDirty,
         markersOnMap: 0,
         waypointsOnMap: 0,
         battleChunksOnMap: 0,
+        markerPositionOnlyUpdates: 0,
+        markerVisualUpdates: 0,
+        markerRecreates: 0,
+        waypointPositionOnlyUpdates: 0,
+        waypointVisualUpdates: 0,
+        waypointRecreates: 0,
+        battleChunkGeometryUpdates: 0,
+        battleChunkVisualUpdates: 0,
+        battleChunkRecreates: 0,
       },
       json: {
         lastInboundMessage: null,
@@ -379,199 +480,302 @@ import { createSettingsUi } from './ui/settingsUi';
     };
   }
 
-  function getOnlinePlayers() {
-    const snapshotPlayers = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.players : null;
-    const tabState = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.tabState : null;
-    const reports = tabState && typeof tabState.reports === 'object' ? tabState.reports : null;
-
-    const mergedById = new Map<string, any>();
-
-    const composeDisplayLabel = (rawLabel: string, rawPlayerName: string) => {
-      const label = String(rawLabel || '').trim();
-      const playerName = String(rawPlayerName || '').trim();
-      if (!label) return playerName;
-      if (!playerName) return label;
-      if (label === playerName) return label;
-      if (label.includes(playerName)) return label;
-      return `${label} ${playerName}`;
-    };
-
-    const labelContainsName = (labelText: string, playerName: string) => {
-      const label = String(labelText || '').trim();
-      const name = String(playerName || '').trim();
-      if (!label || !name) return false;
-      return label.includes(name);
-    };
-
-    const upsertPlayer = (entry: any) => {
-      if (!entry || !entry.playerId) return;
-      const playerId = String(entry.playerId).trim();
-      if (!playerId) return;
-
-      const prev = mergedById.get(playerId);
-      if (!prev) {
-        const playerName = String(entry.playerName || '').trim();
-        const displayLabel = composeDisplayLabel(entry.displayLabel, playerName);
-        mergedById.set(playerId, {
-          playerId,
-          playerName,
-          displayLabel,
-          teamColor: entry.teamColor || null,
-        });
-        return;
-      }
-
-      const nextName = String(entry.playerName || '').trim();
-      const nextDisplay = String(entry.displayLabel || '').trim();
-      const keepName = prev.playerName || nextName;
-
-      const prevDisplayWithName = composeDisplayLabel(prev.displayLabel, keepName);
-      const nextDisplayWithName = composeDisplayLabel(nextDisplay, nextName || keepName);
-      const prevHasName = labelContainsName(prevDisplayWithName, keepName);
-      const nextHasName = labelContainsName(nextDisplayWithName, keepName);
-
-      let keepDisplay = prevDisplayWithName || nextDisplayWithName || keepName;
-      if ((!prevHasName && nextHasName) || (!prevDisplayWithName && nextDisplayWithName)) {
-        keepDisplay = nextDisplayWithName;
-      }
-      const keepColor = prev.teamColor || entry.teamColor || null;
-
-      mergedById.set(playerId, {
-        playerId,
-        playerName: keepName,
-        displayLabel: keepDisplay,
-        teamColor: keepColor,
-      });
-    };
-
-    if (reports) {
-      for (const report of Object.values(reports)) {
-        if (!report || typeof report !== 'object') continue;
-        const tabPlayers = Array.isArray(report.players) ? report.players : [];
-        for (const node of tabPlayers) {
-          if (!node || typeof node !== 'object') continue;
-          const playerId = String(node.uuid || node.id || '').trim();
-          if (!playerId) continue;
-
-          const prefixedName = String(node.prefixedName || '').trim();
-          const displayNameRaw = String(node.displayName || '').trim();
-          const plainName = String(node.name || '').trim();
-          const parsedDisplay = parseMcDisplayName(displayNameRaw || prefixedName);
-          const playerName = plainName || parsedDisplay.plain || prefixedName || playerId;
-          const displayLabel = composeDisplayLabel(prefixedName || parsedDisplay.plain, playerName);
-
-          upsertPlayer({
-            playerId,
-            playerName,
-            displayLabel,
-            teamColor: parsedDisplay.color || null,
-          });
-        }
-      }
-    }
-
-    if (snapshotPlayers && typeof snapshotPlayers === 'object') {
-      for (const [playerId, rawNode] of Object.entries(snapshotPlayers)) {
-        const data = getPlayerDataNode(rawNode);
-        const fallbackName = String((data && data.playerName) || (data && data.playerUUID) || playerId || '').trim();
-        const tabInfo = getTabPlayerInfo(String(playerId));
-        const playerName = (tabInfo && tabInfo.name) ? tabInfo.name : (fallbackName || String(playerId));
-        const displayLabel = composeDisplayLabel(tabInfo && tabInfo.teamText ? tabInfo.teamText : '', playerName);
-
-        upsertPlayer({
-          playerId: String(playerId),
-          playerName,
-          displayLabel,
-          teamColor: tabInfo && tabInfo.teamColor ? tabInfo.teamColor : null,
-        });
-      }
-    }
-
-    const players = Array.from(mergedById.values()).map((item: any) => ({
-      ...item,
-      playerName: item.playerName || item.displayLabel || item.playerId,
-      displayLabel: item.displayLabel || item.playerName || item.playerId,
-    }));
-
-    players.sort((a, b) => {
-      const textA = String(a.displayLabel || a.playerName || a.playerId || '');
-      const textB = String(b.displayLabel || b.playerName || b.playerId || '');
-      return textA.localeCompare(textB, 'zh-Hans-CN');
-    });
-    return players;
+  function samePlayerSelectorRow(left: PlayerSelectorRow | null | undefined, right: PlayerSelectorRow | null | undefined) {
+    return Boolean(left) && Boolean(right) &&
+      left!.playerId === right!.playerId &&
+      left!.playerName === right!.playerName &&
+      left!.displayLabel === right!.displayLabel &&
+      left!.teamColor === right!.teamColor;
   }
 
-  function getMapVisiblePlayersForList() {
-    const snapshotPlayers = latestSnapshot && typeof latestSnapshot === 'object' ? latestSnapshot.players : null;
-    if (!snapshotPlayers || typeof snapshotPlayers !== 'object') {
-      return [];
+  function sameMapPlayerRow(left: MapPlayerRow | null | undefined, right: MapPlayerRow | null | undefined) {
+    return Boolean(left) && Boolean(right) &&
+      left!.playerId === right!.playerId &&
+      left!.playerName === right!.playerName &&
+      left!.team === right!.team &&
+      left!.teamColor === right!.teamColor &&
+      left!.town === right!.town &&
+      left!.townColor === right!.townColor &&
+      left!.health === right!.health &&
+      left!.armor === right!.armor &&
+      left!.x === right!.x &&
+      left!.z === right!.z;
+  }
+
+  function sameMapPlayerRowDisplay(left: MapPlayerRow | null | undefined, right: MapPlayerRow | null | undefined) {
+    return Boolean(left) && Boolean(right) &&
+      left!.playerId === right!.playerId &&
+      left!.playerName === right!.playerName &&
+      left!.team === right!.team &&
+      left!.teamColor === right!.teamColor &&
+      left!.town === right!.town &&
+      left!.townColor === right!.townColor &&
+      left!.health === right!.health &&
+      left!.armor === right!.armor;
+  }
+
+  function invalidatePlayerSelectorRows() {
+    playerSelectorDirty = true;
+    cachedPlayerSelectorRows = null;
+  }
+
+  function invalidateMapPlayerListRows() {
+    mapPlayerListDirty = true;
+    cachedMapPlayerRows = null;
+  }
+
+  function getCanonicalPlayerName(playerId: string, tabInfo: TabPlayerInfo | null, playerData: Record<string, any> | null) {
+    const fallbackName = String(
+      (playerData && (playerData.playerName || playerData.playerUUID || playerData.name)) || playerId || '',
+    ).trim();
+    return String(tabInfo?.name || tabInfo?.autoName || fallbackName || playerId).trim() || String(playerId);
+  }
+
+  function buildPlayerSelectorRow(playerId: string): PlayerSelectorRow | null {
+    const normalizedId = String(playerId || '').trim();
+    if (!normalizedId) return null;
+    const tabInfo = getTabPlayerInfo(normalizedId);
+    const playerData = getSnapshotPlayerData(normalizedId);
+    if (!tabInfo && !playerData) {
+      return null;
     }
 
+    const playerName = getCanonicalPlayerName(normalizedId, tabInfo, playerData);
+    const displayLabel = composeDisplayLabel(tabInfo?.teamText || '', playerName);
+    return {
+      playerId: normalizedId,
+      playerName,
+      displayLabel: displayLabel || playerName || normalizedId,
+      teamColor: tabInfo?.teamColor || null,
+    };
+  }
+
+  function buildMapPlayerRow(playerId: string): MapPlayerRow | null {
+    const normalizedId = String(playerId || '').trim();
+    if (!normalizedId) return null;
+    const data = getSnapshotPlayerData(normalizedId);
+    if (!data) return null;
+
     const wantedDim = normalizeDimension(CONFIG.TARGET_DIMENSION);
+    const dim = normalizeDimension(data.dimension);
+    if (wantedDim && dim !== wantedDim) return null;
+
+    const x = readNumber(data.x);
+    const z = readNumber(data.z);
+    if (x === null || z === null) return null;
+
+    const tabInfo = getTabPlayerInfo(normalizedId);
+    const playerName = getCanonicalPlayerName(normalizedId, tabInfo, data);
+    const displayNameForAutoMark = tabInfo?.teamText ? `${tabInfo.teamText} ${playerName}` : playerName;
+    const existingMark = getPlayerMark(normalizedId);
+    const autoMark = autoTeamFromName(displayNameForAutoMark);
+    const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
+    const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
+    const isManualMark = Boolean(existingMark) && !existingActsAsAuto;
+    const effectiveMark = isManualMark
+      ? existingMark
+      : (autoMark || (existingActsAsAuto ? null : existingMark));
+    const team = normalizeTeam(effectiveMark?.team || 'neutral');
     const teamLabelMap: Record<string, string> = {
       friendly: '友军',
       enemy: '敌军',
       neutral: '中立',
     };
+    const teamColor = normalizeColor(effectiveMark?.color, getConfiguredTeamColor(team, CONFIG));
+    const townColor = normalizeColor(tabInfo?.teamColor, '#93c5fd');
+    const health = readNumber(data.health);
+    const armor = readNumber(data.armor);
 
-    const rows: Array<{
-      playerId: string;
-      playerName: string;
-      team: string;
-      teamColor: string;
-      town: string;
-      townColor: string;
-      health: string;
-      armor: string;
-      x: number;
-      z: number;
-    }> = [];
+    return {
+      playerId: normalizedId,
+      playerName,
+      team: teamLabelMap[team] || teamLabelMap.neutral,
+      teamColor,
+      town: String(tabInfo?.teamText || '').trim() || '-',
+      townColor,
+      health: health === null ? '-' : String(Math.round(health)),
+      armor: armor === null ? '-' : String(Math.round(armor)),
+      x,
+      z,
+    };
+  }
 
-    for (const [playerId, rawNode] of Object.entries(snapshotPlayers)) {
-      const data = getPlayerDataNode(rawNode);
-      if (!data) continue;
+  function upsertPlayerSelectorRow(playerId: string) {
+    const normalizedId = String(playerId || '').trim();
+    if (!normalizedId) return;
+    const previous = playerSelectorRowById.get(normalizedId) || null;
+    const next = buildPlayerSelectorRow(normalizedId);
+    if (!next) {
+      if (!previous) return;
+      playerSelectorRowById.delete(normalizedId);
+      onlinePlayerCount = playerSelectorRowById.size;
+      invalidatePlayerSelectorRows();
+      return;
+    }
+    if (samePlayerSelectorRow(previous, next)) {
+      return;
+    }
+    playerSelectorRowById.set(normalizedId, next);
+    onlinePlayerCount = playerSelectorRowById.size;
+    invalidatePlayerSelectorRows();
+  }
 
-      const dim = normalizeDimension(data.dimension);
-      if (wantedDim && dim !== wantedDim) continue;
+  function upsertMapPlayerRow(playerId: string) {
+    const normalizedId = String(playerId || '').trim();
+    if (!normalizedId) return;
+    const previous = mapPlayerRowById.get(normalizedId) || null;
+    const next = buildMapPlayerRow(normalizedId);
+    if (!next) {
+      if (!previous) return;
+      mapPlayerRowById.delete(normalizedId);
+      visibleMapPlayerCount = mapPlayerRowById.size;
+      invalidateMapPlayerListRows();
+      return;
+    }
+    if (sameMapPlayerRow(previous, next)) {
+      return;
+    }
+    mapPlayerRowById.set(normalizedId, next);
+    visibleMapPlayerCount = mapPlayerRowById.size;
+    if (!sameMapPlayerRowDisplay(previous, next)) {
+      invalidateMapPlayerListRows();
+    }
+  }
 
-      const x = readNumber(data.x);
-      const z = readNumber(data.z);
-      if (x === null || z === null) continue;
+  function rebuildPlayerSelectorRows() {
+    playerSelectorRowById.clear();
+    const nextIds = new Set<string>(tabPlayerIndexById.keys());
+    const snapshotPlayers = getSnapshotPlayers();
+    if (snapshotPlayers) {
+      for (const playerId of Object.keys(snapshotPlayers)) {
+        nextIds.add(String(playerId));
+      }
+    }
+    for (const playerId of nextIds) {
+      const nextRow = buildPlayerSelectorRow(playerId);
+      if (nextRow) {
+        playerSelectorRowById.set(String(playerId), nextRow);
+      }
+    }
+    onlinePlayerCount = playerSelectorRowById.size;
+    invalidatePlayerSelectorRows();
+  }
 
-      const fallbackName = String(data.playerName || data.playerUUID || playerId || '').trim();
-      const autoName = getTabPlayerName(String(playerId)) || fallbackName || String(playerId);
-      const tabInfo = getTabPlayerInfo(String(playerId));
-      const existingMark = getPlayerMark(String(playerId));
-      const autoMark = autoTeamFromName(autoName);
-      const existingMarkSource = existingMark ? normalizeMarkSource(existingMark.source) : 'manual';
-      const existingActsAsAuto = Boolean(existingMark) && existingMarkSource === 'auto';
-      const isManualMark = Boolean(existingMark) && !existingActsAsAuto;
-      const effectiveMark = isManualMark
-        ? existingMark
-        : (autoMark || (existingActsAsAuto ? null : existingMark));
+  function rebuildMapPlayerRows() {
+    mapPlayerRowById.clear();
+    const snapshotPlayers = getSnapshotPlayers();
+    if (snapshotPlayers) {
+      for (const playerId of Object.keys(snapshotPlayers)) {
+        const nextRow = buildMapPlayerRow(playerId);
+        if (nextRow) {
+          mapPlayerRowById.set(String(playerId), nextRow);
+        }
+      }
+    }
+    visibleMapPlayerCount = mapPlayerRowById.size;
+    invalidateMapPlayerListRows();
+  }
 
-      const team = normalizeTeam(effectiveMark && effectiveMark.team ? effectiveMark.team : 'neutral');
-      const teamColor = getConfiguredTeamColor(team, CONFIG);
-      const townColor = normalizeColor(tabInfo && tabInfo.teamColor, '#93c5fd');
-      const health = readNumber(data.health);
-      const armor = readNumber(data.armor);
+  function rebuildAllDerivedPlayerCaches() {
+    rebuildPlayerSelectorRows();
+    rebuildMapPlayerRows();
+  }
 
-      rows.push({
-        playerId: String(playerId),
-        playerName: autoName,
-        team: teamLabelMap[team] || teamLabelMap.neutral,
-        teamColor,
-        town: (tabInfo && String(tabInfo.teamText || '').trim()) || '-',
-        townColor,
-        health: health === null ? '-' : String(Math.round(health)),
-        armor: armor === null ? '-' : String(Math.round(armor)),
-        x,
-        z,
-      });
+  function materializePlayerSelectorRows() {
+    if (!playerSelectorDirty && cachedPlayerSelectorRows) {
+      return cachedPlayerSelectorRows;
+    }
+    const nextRows = Array.from(playerSelectorRowById.values()).sort((left, right) => {
+      const leftText = String(left.displayLabel || left.playerName || left.playerId || '');
+      const rightText = String(right.displayLabel || right.playerName || right.playerId || '');
+      return leftText.localeCompare(rightText, 'zh-Hans-CN');
+    });
+    cachedPlayerSelectorRows = nextRows;
+    playerSelectorDirty = false;
+    return nextRows;
+  }
+
+  function materializeMapPlayerRows() {
+    if (!mapPlayerListDirty && cachedMapPlayerRows) {
+      return cachedMapPlayerRows;
+    }
+    const nextRows = Array.from(mapPlayerRowById.values())
+      .sort((left, right) => left.playerName.localeCompare(right.playerName, 'zh-Hans-CN'))
+      .map(({ x, z, ...row }) => row);
+    cachedMapPlayerRows = nextRows;
+    mapPlayerListDirty = false;
+    return nextRows;
+  }
+
+  function shouldFlushPlayerSelectorUi() {
+    return settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark';
+  }
+
+  function shouldFlushMapPlayerListUi() {
+    return settingsUi.isPlayerListVisible();
+  }
+
+  function flushVisiblePlayerUi(options: { forceSelector?: boolean; forceMapPlayerList?: boolean } = {}) {
+    const shouldFlushSelector = Boolean(options.forceSelector) || shouldFlushPlayerSelectorUi();
+    const shouldFlushMapPlayerList = Boolean(options.forceMapPlayerList) || shouldFlushMapPlayerListUi();
+    if (!shouldFlushSelector && !shouldFlushMapPlayerList) {
+      return;
     }
 
-    rows.sort((a, b) => a.playerName.localeCompare(b.playerName, 'zh-Hans-CN'));
-    return rows;
+    const flushStartedAt = performance.now();
+    let flushed = false;
+    if (shouldFlushSelector && (options.forceSelector || playerSelectorDirty)) {
+      settingsUi.refreshPlayerSelector(materializePlayerSelectorRows());
+      flushed = true;
+    }
+    if (shouldFlushMapPlayerList && (options.forceMapPlayerList || mapPlayerListDirty)) {
+      settingsUi.refreshMapPlayerList(materializeMapPlayerRows());
+      flushed = true;
+    }
+    if (flushed) {
+      lastPlayerUiFlushMs = Math.max(0, performance.now() - flushStartedAt);
+    }
+  }
+
+  function syncDerivedPlayersForChange(changeSet: SnapshotChangeSet | null) {
+    const deriveStartedAt = performance.now();
+    if (!changeSet || changeSet.kind === 'full') {
+      rebuildTabPlayerIndex();
+      rebuildAllDerivedPlayerCaches();
+      lastPlayerDeriveMs = Math.max(0, performance.now() - deriveStartedAt);
+      return;
+    }
+
+    if (changeSet.dirtyScopes.tabState) {
+      rebuildTabPlayerIndex();
+      rebuildAllDerivedPlayerCaches();
+      lastPlayerDeriveMs = Math.max(0, performance.now() - deriveStartedAt);
+      return;
+    }
+
+    if (changeSet.dirtyScopes.players) {
+      for (const playerId of changeSet.deleteIds.players) {
+        upsertPlayerSelectorRow(String(playerId));
+        upsertMapPlayerRow(String(playerId));
+      }
+      for (const playerId of changeSet.upsertIds.players) {
+        upsertPlayerSelectorRow(String(playerId));
+        upsertMapPlayerRow(String(playerId));
+      }
+    }
+
+    if (changeSet.dirtyScopes.playerMarks) {
+      for (const playerId of changeSet.deleteIds.playerMarks) {
+        upsertMapPlayerRow(String(playerId));
+      }
+      for (const playerId of changeSet.upsertIds.playerMarks) {
+        upsertMapPlayerRow(String(playerId));
+      }
+    }
+
+    onlinePlayerCount = playerSelectorRowById.size;
+    visibleMapPlayerCount = mapPlayerRowById.size;
+    lastPlayerDeriveMs = Math.max(0, performance.now() - deriveStartedAt);
   }
 
   const mapProjection = createMapProjection({
@@ -701,9 +905,13 @@ import { createSettingsUi } from './ui/settingsUi';
         Object.assign(CONFIG, parsed.config);
         saveConfigToStorage();
         settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
+        rebuildDerivedPlayersForCurrentState();
         mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
         wsClient?.reconnect();
-        refreshPlayerLists();
+        flushVisiblePlayerUi({
+          forceSelector: settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark',
+          forceMapPlayerList: settingsUi.isPlayerListVisible(),
+        });
         lastErrorText = null;
         updateUiStatus();
       } catch (error) {
@@ -719,25 +927,35 @@ import { createSettingsUi } from './ui/settingsUi';
     input.click();
   }
 
+  function updateOverviewStatus(options: { includeDimensionOptions?: boolean } = {}) {
+    const mapCounts = mapProjection.getCounts();
+    const annotations = mapCounts.markers + mapCounts.waypoints;
+    const overviewPatch: Record<string, any> = {
+      wsConnected,
+      hasError: Boolean(lastErrorText),
+      markerCount: annotations,
+      battleChunkCount: mapCounts.battleChunks,
+      onlinePlayerCount,
+      mapPlayerCount: visibleMapPlayerCount,
+      roomCode: CONFIG.ROOM_CODE,
+      targetDimension: CONFIG.TARGET_DIMENSION,
+      clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
+      serverProtocolVersion: serverProtocolVersion || '-',
+    };
+    if (options.includeDimensionOptions) {
+      overviewPatch.dimensionOptions = cachedDimensionOptions;
+    }
+    settingsUi.updateStatus(lastErrorText ? `错误: ${lastErrorText}` : '', overviewPatch);
+  }
+
   function updateUiStatus(options: { recomputeDimensionOptions?: boolean; recomputeDebug?: boolean } = {}) {
     const startedAt = performance.now();
     if (options.recomputeDimensionOptions !== false) {
       updateDimensionOptionsCache();
     }
-    const mapCounts = mapProjection.getCounts();
-    const annotations = mapCounts.markers + mapCounts.waypoints;
-    settingsUi.updateStatus(lastErrorText ? `错误: ${lastErrorText}` : '',
-      {
-        wsConnected,
-        hasError: Boolean(lastErrorText),
-        markerCount: annotations,
-        battleChunkCount: mapCounts.battleChunks,
-        roomCode: CONFIG.ROOM_CODE,
-        targetDimension: CONFIG.TARGET_DIMENSION,
-        dimensionOptions: cachedDimensionOptions,
-        clientProtocolVersion: ADMIN_NETWORK_PROTOCOL_VERSION,
-        serverProtocolVersion: serverProtocolVersion || '-',
-      });
+    updateOverviewStatus({
+      includeDimensionOptions: options.recomputeDimensionOptions !== false,
+    });
     const shouldRecomputeDebug = options.recomputeDebug !== false;
     if (shouldRecomputeDebug || !isDebugPanelEnabled()) {
       settingsUi.updateDebug(
@@ -837,9 +1055,23 @@ import { createSettingsUi } from './ui/settingsUi';
         lastOverlayApplyMs: Number(mapDebug.lastApplyDurationMs || 0),
         lastOverlayApplyMode: String(mapDebug.lastApplyMode || 'idle'),
         lastUiRefreshMs: lastUiRefreshDurationMs,
+        lastPlayerDeriveMs,
+        lastPlayerUiFlushMs,
+        tabIndexedPlayers: tabPlayerIndexById.size,
+        playerSelectorDirty,
+        mapPlayerListDirty,
         markersOnMap: Number(mapDebug.markers || 0),
         waypointsOnMap: Number(mapDebug.waypoints || 0),
         battleChunksOnMap: Number(mapDebug.battleChunks || 0),
+        markerPositionOnlyUpdates: Number(mapDebug.markerPositionOnlyUpdates || 0),
+        markerVisualUpdates: Number(mapDebug.markerVisualUpdates || 0),
+        markerRecreates: Number(mapDebug.markerRecreates || 0),
+        waypointPositionOnlyUpdates: Number(mapDebug.waypointPositionOnlyUpdates || 0),
+        waypointVisualUpdates: Number(mapDebug.waypointVisualUpdates || 0),
+        waypointRecreates: Number(mapDebug.waypointRecreates || 0),
+        battleChunkGeometryUpdates: Number(mapDebug.battleChunkGeometryUpdates || 0),
+        battleChunkVisualUpdates: Number(mapDebug.battleChunkVisualUpdates || 0),
+        battleChunkRecreates: Number(mapDebug.battleChunkRecreates || 0),
       },
       json: {
         lastInboundMessage: normalizeDebugJsonValue(wsDebug?.lastInbound?.payload ?? null),
@@ -941,9 +1173,23 @@ import { createSettingsUi } from './ui/settingsUi';
     return { ok: false, error: '请先从在线玩家列表选择目标玩家' };
   }
 
-  function refreshPlayerLists() {
-    settingsUi.refreshPlayerSelector(getOnlinePlayers());
-    settingsUi.refreshMapPlayerList(getMapVisiblePlayersForList());
+  function getPlayerDeriveConfigSignature() {
+    return [
+      normalizeDimension(CONFIG.TARGET_DIMENSION),
+      String(Boolean(CONFIG.AUTO_TEAM_FROM_NAME)),
+      String(CONFIG.FRIENDLY_TAGS || ''),
+      String(CONFIG.ENEMY_TAGS || ''),
+      String(CONFIG.TEAM_COLOR_FRIENDLY || ''),
+      String(CONFIG.TEAM_COLOR_ENEMY || ''),
+      String(CONFIG.TEAM_COLOR_NEUTRAL || ''),
+    ].join('\n');
+  }
+
+  function rebuildDerivedPlayersForCurrentState() {
+    const startedAt = performance.now();
+    invalidateAutoTeamTagCache();
+    rebuildAllDerivedPlayerCaches();
+    lastPlayerDeriveMs = Math.max(0, performance.now() - startedAt);
   }
 
   function focusMapPlayerById(playerId: string) {
@@ -954,8 +1200,7 @@ import { createSettingsUi } from './ui/settingsUi';
       return;
     }
 
-    const mapPlayers = getMapVisiblePlayersForList();
-    const target = mapPlayers.find((item) => item.playerId === targetId);
+    const target = mapPlayerRowById.get(targetId) || null;
     if (!target) {
       lastErrorText = '目标玩家当前不在地图显示列表中';
       updateUiStatus();
@@ -975,10 +1220,18 @@ import { createSettingsUi } from './ui/settingsUi';
 
   function applyFormToConfig() {
     const previousDebugPanelEnabled = isDebugPanelEnabled();
+    const previousPlayerDeriveConfigSignature = getPlayerDeriveConfigSignature();
     const next = sanitizeConfig(settingsUi.readFormCandidate(CONFIG));
     Object.assign(CONFIG, next);
     if (previousDebugPanelEnabled && !isDebugPanelEnabled()) {
       wsClient?.clearDebugHistory?.();
+    }
+    if (previousPlayerDeriveConfigSignature !== getPlayerDeriveConfigSignature()) {
+      rebuildDerivedPlayersForCurrentState();
+      flushVisiblePlayerUi({
+        forceSelector: settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark',
+        forceMapPlayerList: settingsUi.isPlayerListVisible(),
+      });
     }
     saveConfigToStorage();
     mapProjection.ensureMapInteractionGuard();
@@ -1062,7 +1315,6 @@ import { createSettingsUi } from './ui/settingsUi';
     uiStyleText: UI_STYLE_TEXT,
     onAutoApply: () => {
       applyFormToConfig();
-      refreshPlayerLists();
     },
     onSave: () => {
       applyFormToConfig();
@@ -1073,7 +1325,6 @@ import { createSettingsUi } from './ui/settingsUi';
     },
     onSaveDisplay: () => {
       applyFormToConfig();
-      refreshPlayerLists();
     },
     onExportConfig: () => {
       exportConfig();
@@ -1083,9 +1334,14 @@ import { createSettingsUi } from './ui/settingsUi';
     },
     onReset: () => {
       Object.assign(CONFIG, DEFAULT_CONFIG);
+      rebuildDerivedPlayersForCurrentState();
       saveConfigToStorage();
       settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
       mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
+      flushVisiblePlayerUi({
+        forceSelector: settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark',
+        forceMapPlayerList: settingsUi.isPlayerListVisible(),
+      });
       wsClient?.reconnect();
       updateUiStatus();
     },
@@ -1105,9 +1361,11 @@ import { createSettingsUi } from './ui/settingsUi';
     },
     onTogglePlayerList: (visible) => {
       settingsUi.setPlayerListVisible(Boolean(visible));
-      refreshPlayerLists();
+      flushVisiblePlayerUi({
+        forceMapPlayerList: settingsUi.isPlayerListVisible(),
+      });
       lastErrorText = null;
-      updateUiStatus();
+      updateOverviewStatus();
     },
     onFocusMapPlayer: (playerId) => {
       focusMapPlayerById(playerId);
@@ -1116,8 +1374,12 @@ import { createSettingsUi } from './ui/settingsUi';
       const nextDimension = normalizeDimension(dimension) || DEFAULT_CONFIG.TARGET_DIMENSION;
       CONFIG.TARGET_DIMENSION = nextDimension;
       settingsUi.setTargetDimension(nextDimension);
+      rebuildDerivedPlayersForCurrentState();
       mapProjection.applyLatestSnapshotIfPossible(latestSnapshot);
-      refreshPlayerLists();
+      flushVisiblePlayerUi({
+        forceSelector: settingsUi.isPanelVisible() && settingsUi.getCurrentPage() === 'mark',
+        forceMapPlayerList: settingsUi.isPlayerListVisible(),
+      });
       lastErrorText = null;
       updateUiStatus();
     },
@@ -1132,6 +1394,22 @@ import { createSettingsUi } from './ui/settingsUi';
     },
     onDebugClearHistory: () => {
       clearDebugHistory();
+    },
+    onPageChanged: (page) => {
+      if (page === 'mark') {
+        flushVisiblePlayerUi({ forceSelector: settingsUi.isPanelVisible() });
+        return;
+      }
+      if (page === 'main' && settingsUi.isPlayerListVisible()) {
+        flushVisiblePlayerUi({ forceMapPlayerList: true });
+      }
+    },
+    onPanelVisibilityChanged: (visible) => {
+      if (!visible) return;
+      flushVisiblePlayerUi({
+        forceSelector: settingsUi.getCurrentPage() === 'mark',
+        forceMapPlayerList: settingsUi.isPlayerListVisible(),
+      });
     },
   });
 
@@ -1313,7 +1591,6 @@ import { createSettingsUi } from './ui/settingsUi';
         return;
       }
       settingsUi.fillFormFromConfig(CONFIG, (team) => getConfiguredTeamColor(team, CONFIG));
-      refreshPlayerLists();
       updateUiStatus();
     }, delay);
   }
@@ -1365,11 +1642,11 @@ import { createSettingsUi } from './ui/settingsUi';
         latestPlayerMarks = snapshot && typeof snapshot.playerMarks === 'object' && snapshot.playerMarks
           ? snapshot.playerMarks
           : {};
-        if (shouldRefreshPlayerListForChange(changeSet)) {
-          refreshPlayerLists();
-        }
+        syncDerivedPlayersForChange(changeSet);
         lastErrorText = null;
         mapProjection.applySnapshotUpdate(snapshot, changeSet);
+        flushVisiblePlayerUi();
+        updateOverviewStatus();
         scheduleOverlayStart(0);
         scheduleUiStatusUpdate({
           recomputeDimensionOptions: changeSet.hasWorldRenderImpact,

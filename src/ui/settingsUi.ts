@@ -1,6 +1,8 @@
 import { App, createApp, reactive } from 'vue';
 import OverlaySettingsPanel from './components/OverlaySettingsPanel.vue';
 
+type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection' | 'help';
+
 type PlayerOption = {
   playerId: string;
   playerName: string;
@@ -43,6 +45,8 @@ type SettingsUiDeps = {
   onDebugCopySnapshot: () => void;
   onDebugCopyLastMessage: () => void;
   onDebugClearHistory: () => void;
+  onPageChanged?: (page: UiPage) => void;
+  onPanelVisibilityChanged?: (visible: boolean) => void;
   getPlayerOptionColor?: (item: PlayerOption) => string | null;
 };
 
@@ -66,9 +70,30 @@ type DebugSummaryState = {
   hasLeafletRef: boolean;
   hasCapturedMap: boolean;
   mapContainerConnected: boolean;
+  interactionPaused: boolean;
+  interactionReplayDroppedCount: number;
+  lastDecodeMs: number;
+  lastMergeMs: number;
+  lastOverlayApplyMs: number;
+  lastOverlayApplyMode: string;
+  lastUiRefreshMs: number;
+  lastPlayerDeriveMs: number;
+  lastPlayerUiFlushMs: number;
+  tabIndexedPlayers: number;
+  playerSelectorDirty: boolean;
+  mapPlayerListDirty: boolean;
   markersOnMap: number;
   waypointsOnMap: number;
   battleChunksOnMap: number;
+  markerPositionOnlyUpdates: number;
+  markerVisualUpdates: number;
+  markerRecreates: number;
+  waypointPositionOnlyUpdates: number;
+  waypointVisualUpdates: number;
+  waypointRecreates: number;
+  battleChunkGeometryUpdates: number;
+  battleChunkVisualUpdates: number;
+  battleChunkRecreates: number;
 };
 
 type DebugState = {
@@ -155,9 +180,30 @@ function createDefaultDebugState(): DebugState {
       hasLeafletRef: false,
       hasCapturedMap: false,
       mapContainerConnected: false,
+      interactionPaused: false,
+      interactionReplayDroppedCount: 0,
+      lastDecodeMs: 0,
+      lastMergeMs: 0,
+      lastOverlayApplyMs: 0,
+      lastOverlayApplyMode: 'idle',
+      lastUiRefreshMs: 0,
+      lastPlayerDeriveMs: 0,
+      lastPlayerUiFlushMs: 0,
+      tabIndexedPlayers: 0,
+      playerSelectorDirty: false,
+      mapPlayerListDirty: false,
       markersOnMap: 0,
       waypointsOnMap: 0,
       battleChunksOnMap: 0,
+      markerPositionOnlyUpdates: 0,
+      markerVisualUpdates: 0,
+      markerRecreates: 0,
+      waypointPositionOnlyUpdates: 0,
+      waypointVisualUpdates: 0,
+      waypointRecreates: 0,
+      battleChunkGeometryUpdates: 0,
+      battleChunkVisualUpdates: 0,
+      battleChunkRecreates: 0,
     },
     json: {
       lastInboundMessage: null,
@@ -180,8 +226,6 @@ function createDefaultDebugState(): DebugState {
     lastRuntimeError: null,
   };
 }
-
-type UiPage = 'main' | 'advanced' | 'display' | 'mark' | 'connection' | 'help';
 
 type OverviewState = {
   wsConnected: boolean;
@@ -362,6 +406,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     if (!panelVisible) {
       state.playerListVisible = false;
     }
+    deps.onPanelVisibilityChanged?.(panelVisible);
   }
 
   function updatePanelPositionNearFab() {
@@ -456,6 +501,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
         onDebugCopySnapshot: deps.onDebugCopySnapshot,
         onDebugCopyLastMessage: deps.onDebugCopyLastMessage,
         onDebugClearHistory: deps.onDebugClearHistory,
+        onPageChanged: deps.onPageChanged,
       },
       getPlayerOptionColor: deps.getPlayerOptionColor,
     });
@@ -759,7 +805,7 @@ export function createSettingsUi(deps: SettingsUiDeps) {
 
   function setPlayerListVisible(visible: boolean) {
     const nextVisible = Boolean(visible);
-    if (nextVisible && state.mapPlayers.length <= 0) {
+    if (nextVisible && state.overview.mapPlayerCount <= 0) {
       state.playerListVisible = false;
       return;
     }
@@ -786,6 +832,18 @@ export function createSettingsUi(deps: SettingsUiDeps) {
   function setTargetDimension(dimension: string) {
     const next = String(dimension || 'minecraft:overworld').trim() || 'minecraft:overworld';
     state.overview.targetDimension = next;
+  }
+
+  function isPanelVisible() {
+    return panelVisible;
+  }
+
+  function getCurrentPage() {
+    return state.page;
+  }
+
+  function isPlayerListVisible() {
+    return panelVisible && state.page === 'main' && state.playerListVisible;
   }
 
   function updateDebug(debugPatch: Partial<DebugState> | null | undefined) {
@@ -863,6 +921,9 @@ export function createSettingsUi(deps: SettingsUiDeps) {
     setMarkColor,
     setServerFilterEnabled,
     setTargetDimension,
+    isPanelVisible,
+    getCurrentPage,
+    isPlayerListVisible,
     updateDebug,
     setPlayerListVisible,
     setPanelVisible,

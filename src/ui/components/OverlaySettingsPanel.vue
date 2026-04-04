@@ -122,9 +122,30 @@ type OverlayUiState = {
       hasLeafletRef: boolean;
       hasCapturedMap: boolean;
       mapContainerConnected: boolean;
+      interactionPaused: boolean;
+      interactionReplayDroppedCount: number;
+      lastDecodeMs: number;
+      lastMergeMs: number;
+      lastOverlayApplyMs: number;
+      lastOverlayApplyMode: string;
+      lastUiRefreshMs: number;
+      lastPlayerDeriveMs: number;
+      lastPlayerUiFlushMs: number;
+      tabIndexedPlayers: number;
+      playerSelectorDirty: boolean;
+      mapPlayerListDirty: boolean;
       markersOnMap: number;
       waypointsOnMap: number;
       battleChunksOnMap: number;
+      markerPositionOnlyUpdates: number;
+      markerVisualUpdates: number;
+      markerRecreates: number;
+      waypointPositionOnlyUpdates: number;
+      waypointVisualUpdates: number;
+      waypointRecreates: number;
+      battleChunkGeometryUpdates: number;
+      battleChunkVisualUpdates: number;
+      battleChunkRecreates: number;
     };
     json: {
       lastInboundMessage: unknown;
@@ -207,6 +228,7 @@ type OverlayUiActions = {
   onDebugCopySnapshot: () => void;
   onDebugCopyLastMessage: () => void;
   onDebugClearHistory: () => void;
+  onPageChanged?: (page: OverlayUiState['page']) => void;
 };
 
 const props = defineProps<{
@@ -247,6 +269,7 @@ const debugDimensionTarget = computed(() => props.state.debug.dimensionFilter.ta
 function setPage(nextPage: OverlayUiState['page']) {
   configMenuVisible.value = false;
   props.state.page = nextPage;
+  props.actions.onPageChanged?.(nextPage);
 }
 
 function getOptionColor(item: PlayerOption) {
@@ -358,6 +381,12 @@ function formatTimestamp(value: number | null | undefined) {
 
 function formatJson(value: unknown) {
   return stringifyDebugJson(value);
+}
+
+function formatDurationMs(value: number | null | undefined) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return '-';
+  return `${ms.toFixed(2)}ms`;
 }
 
 function formatDimensionBucket(item: {
@@ -832,6 +861,10 @@ function formatDimensionBucket(item: {
           <strong>{{ state.debug.summary.onlinePlayersFromTab }}</strong>
         </div>
         <div class="n-debug-metric-card">
+          <span>Tab 索引玩家</span>
+          <strong>{{ state.debug.summary.tabIndexedPlayers }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
           <span>Tab 报告源</span>
           <strong>{{ state.debug.summary.tabReports }}</strong>
         </div>
@@ -876,6 +909,22 @@ function formatDimensionBucket(item: {
           <strong>{{ state.debug.summary.mapContainerConnected ? '已挂载' : '未挂载' }}</strong>
         </div>
         <div class="n-debug-metric-card">
+          <span>玩家派生耗时</span>
+          <strong>{{ formatDurationMs(state.debug.summary.lastPlayerDeriveMs) }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>玩家 UI Flush</span>
+          <strong>{{ formatDurationMs(state.debug.summary.lastPlayerUiFlushMs) }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>选择器状态</span>
+          <strong>{{ state.debug.summary.playerSelectorDirty ? 'dirty' : 'clean' }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>地图列表状态</span>
+          <strong>{{ state.debug.summary.mapPlayerListDirty ? 'dirty' : 'clean' }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
           <span>维度命中对象</span>
           <strong>{{ state.debug.dimensionFilter.matchingTarget }}</strong>
         </div>
@@ -890,6 +939,42 @@ function formatDimensionBucket(item: {
         <div class="n-debug-metric-card">
           <span>缺少维度字段</span>
           <strong>{{ state.debug.dimensionFilter.missingDimension }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>玩家仅位置更新</span>
+          <strong>{{ state.debug.summary.markerPositionOnlyUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>玩家视觉更新</span>
+          <strong>{{ state.debug.summary.markerVisualUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>玩家重建</span>
+          <strong>{{ state.debug.summary.markerRecreates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>路标仅位置更新</span>
+          <strong>{{ state.debug.summary.waypointPositionOnlyUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>路标视觉更新</span>
+          <strong>{{ state.debug.summary.waypointVisualUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>路标重建</span>
+          <strong>{{ state.debug.summary.waypointRecreates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>区块几何更新</span>
+          <strong>{{ state.debug.summary.battleChunkGeometryUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>区块视觉更新</span>
+          <strong>{{ state.debug.summary.battleChunkVisualUpdates }}</strong>
+        </div>
+        <div class="n-debug-metric-card">
+          <span>区块重建</span>
+          <strong>{{ state.debug.summary.battleChunkRecreates }}</strong>
         </div>
       </div>
 
