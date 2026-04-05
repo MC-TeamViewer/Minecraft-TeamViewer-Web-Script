@@ -20,7 +20,7 @@ export const USERSCRIPT_META = {
 
 export const PROTOCOL_META = {
   adminNetworkProtocolVersion: '0.6.1',
-  adminMinCompatibleNetworkProtocolVersion: '0.6.0',
+  adminMinCompatibleNetworkProtocolVersion: '0.6.1',
 };
 
 export const APP_META = {

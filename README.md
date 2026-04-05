@@ -53,7 +53,7 @@
 
 仓库内可直接导入的脚本产物：
 
-- `build-artifacts/team-view-relay-web-script-v0.4.8-proto0.6.0.user.js`
+- `build-artifacts/team-view-relay-web-script-v0.4.9-proto0.6.1.user.js`
 
 也可以自行构建后，导入 `dist/*.user.js`。
 
@@ -138,9 +138,9 @@ pnpm proto:generate
 
 当前版本基线：
 
-- userscript：`0.4.8`
-- 协议版本：`0.6.0`
-- 最低兼容协议版本：`0.6.0`
+- userscript：`0.4.9`
+- 协议版本：`0.6.1`
+- 最低兼容协议版本：`0.6.1`
 
 共享 ProtoBuf 协议源位于：
 
@@ -162,7 +162,7 @@ pnpm proto:generate
 
 ```bash
 git -C third_party/TeamViewRelay-Protocol fetch --tags
-git -C third_party/TeamViewRelay-Protocol checkout proto/v0.6.0
+git -C third_party/TeamViewRelay-Protocol checkout proto/v0.6.1
 git add third_party/TeamViewRelay-Protocol
 pnpm proto:generate
 pnpm build
