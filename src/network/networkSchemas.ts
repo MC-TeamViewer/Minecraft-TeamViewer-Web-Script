@@ -6,6 +6,7 @@ import {
 } from '../constants';
 import { normalizeDimension, normalizeRoomCode } from '../utils/overlayUtils';
 import {
+  BattleChunkMetaRequestSchema,
   CommandPlayerMarkClearAllSchema,
   CommandPlayerMarkClearSchema,
   CommandPlayerMarkSetSchema,
@@ -85,11 +86,13 @@ export type BattleChunkData = {
   markerType?: string | null;
   colorRaw: string;
   colorNote?: string | null;
+  roomCode?: string | null;
+  colorMode?: string | null;
+  colorSemanticKey?: string | null;
   observedAt?: number | null;
   positionSampledAt?: number | null;
   alignmentSource?: string | null;
   reporterId?: string | null;
-  roomCode?: string | null;
 };
 
 export const PLAYER_DATA_RELIABILITY: Record<string, boolean> = {
@@ -250,12 +253,19 @@ export type PatchInboundPacket = {
   [key: string]: unknown;
 };
 
+export type BattleChunkMetaSnapshotInboundPacket = {
+  type: 'battle_chunk_meta_snapshot';
+  battleChunks?: Record<string, BattleChunkNode>;
+  [key: string]: unknown;
+};
+
 export type WebMapInboundPacket =
   | WebMapAckInboundPacket
   | HandshakeAckInboundPacket
   | PongInboundPacket
   | SnapshotFullInboundPacket
-  | PatchInboundPacket;
+  | PatchInboundPacket
+  | BattleChunkMetaSnapshotInboundPacket;
 
 export function createEmptyWebMapSnapshotModel(): WebMapSnapshot {
   return {
@@ -276,6 +286,24 @@ function createWebMapEnvelope(payload: WireEnvelope['payload']): WebMapOutboundP
     channel: WireChannel.WEB_MAP,
     payload,
   });
+}
+
+function parseBattleChunkSyntheticId(chunkId: string) {
+  const parts = String(chunkId || '').trim().split('|');
+  if (parts.length !== 3) {
+    return null;
+  }
+  const dimension = normalizeDimension(parts[0]) || '';
+  const chunkX = Number(parts[1]);
+  const chunkZ = Number(parts[2]);
+  if (!dimension || !Number.isFinite(chunkX) || !Number.isFinite(chunkZ)) {
+    return null;
+  }
+  return {
+    dimension,
+    chunkX: Math.trunc(chunkX),
+    chunkZ: Math.trunc(chunkZ),
+  };
 }
 
 export function buildWebMapHandshake(roomCode: string): WebMapOutboundPacket {
@@ -414,6 +442,27 @@ export function buildWebMapResyncRequest(reason = 'baseline_missing'): WebMapOut
   });
 }
 
+export function buildBattleChunkMetaRequest(chunkIds: string[]): WebMapOutboundPacket {
+  const battleChunks = Array.isArray(chunkIds)
+    ? chunkIds
+      .map((chunkId) => parseBattleChunkSyntheticId(chunkId))
+      .filter((item): item is NonNullable<ReturnType<typeof parseBattleChunkSyntheticId>> => Boolean(item))
+      .map((item) => ({
+        dimension: item.dimension,
+        coord: {
+          chunkX: item.chunkX,
+          chunkZ: item.chunkZ,
+        },
+      }))
+    : [];
+  return createWebMapEnvelope({
+    case: 'battleChunkMetaRequest',
+    value: create(BattleChunkMetaRequestSchema, {
+      battleChunks,
+    }),
+  });
+}
+
 export function parseWebMapInboundPacket(payload: unknown): WebMapInboundPacket | null {
   if (!payload || typeof payload !== 'object') {
     return null;
@@ -431,6 +480,7 @@ export function parseWebMapInboundPacket(payload: unknown): WebMapInboundPacket 
     case 'pong':
     case 'snapshot_full':
     case 'patch':
+    case 'battle_chunk_meta_snapshot':
       return message as WebMapInboundPacket;
     default:
       return null;

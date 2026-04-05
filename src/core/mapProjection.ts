@@ -20,6 +20,7 @@ type MapProjectionDeps = {
   getConfiguredTeamColor: (team: string) => string;
   maybeSyncAutoDetectedMarks: (candidates: any[]) => void;
   getLatestPlayerMarks: () => Record<string, any>;
+  getBattleChunkMeta?: (chunkId: string) => any;
   getWsConnected: () => boolean;
   onCreateTacticalWaypoint?: (payload: {
     x: number;
@@ -70,6 +71,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
   const waypointGeometryMemoById = new Map<string, string>();
   const waypointRenderMemoById = new Map<string, string>();
   const battleChunkLayersById = new Map<string, any>();
+  const battleChunkPayloadById = new Map<string, any>();
   const battleChunkGeometryMemoById = new Map<string, string>();
   const battleChunkRenderMemoById = new Map<string, string>();
   const trackedWaypointPositions = new Map<string, { x: number; z: number }>();
@@ -1296,17 +1298,24 @@ export function createMapProjection(deps: MapProjectionDeps) {
   }
 
   function buildBattleChunkTooltip(chunkId: string, payload: any) {
-    const symbol = escapeHtml(String(payload?.symbol || '').trim() || ' ');
-    const markerType = escapeHtml(String(payload?.markerType || '').trim() || '');
-    const colorRaw = escapeHtml(String(payload?.colorRaw || '').trim() || '-');
-    const colorNote = escapeHtml(String(payload?.colorNote || '').trim() || '');
-    const dimension = escapeHtml(String(payload?.dimension || '').trim() || '');
-    const chunkX = Number(payload?.chunkX);
-    const chunkZ = Number(payload?.chunkZ);
-    const observedAt = Number(payload?.observedAt);
-    const positionSampledAt = Number(payload?.positionSampledAt);
-    const alignmentSource = escapeHtml(String(payload?.alignmentSource || '').trim() || '');
-    const renderMode = escapeHtml(String(payload?.renderMode || '').trim() || '');
+    const metaPayload = typeof deps.getBattleChunkMeta === 'function'
+      ? deps.getBattleChunkMeta(chunkId)
+      : null;
+    const effectivePayload = metaPayload && typeof metaPayload === 'object'
+      ? { ...payload, ...metaPayload }
+      : payload;
+    const symbol = escapeHtml(String(effectivePayload?.symbol || '').trim() || ' ');
+    const markerType = escapeHtml(String(effectivePayload?.markerType || '').trim() || '');
+    const colorRaw = escapeHtml(String(effectivePayload?.colorRaw || '').trim() || '-');
+    const colorNote = escapeHtml(String(effectivePayload?.colorNote || '').trim() || '');
+    const dimension = escapeHtml(String(effectivePayload?.dimension || '').trim() || '');
+    const chunkX = Number(effectivePayload?.chunkX);
+    const chunkZ = Number(effectivePayload?.chunkZ);
+    const observedAt = Number(effectivePayload?.observedAt);
+    const positionSampledAt = Number(effectivePayload?.positionSampledAt);
+    const alignmentSource = escapeHtml(String(effectivePayload?.alignmentSource || '').trim() || '');
+    const reporterId = escapeHtml(String(effectivePayload?.reporterId || '').trim() || '');
+    const renderMode = escapeHtml(String(effectivePayload?.renderMode || '').trim() || '');
     const observedText = Number.isFinite(observedAt) ? new Date(observedAt).toLocaleString() : '-';
     const sampledText = Number.isFinite(positionSampledAt) ? new Date(positionSampledAt).toLocaleString() : '-';
     const lines = [
@@ -1327,6 +1336,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
     lines.push(`at: ${escapeHtml(observedText)}`);
     if (alignmentSource) {
       lines.push(`align: ${alignmentSource}`);
+    }
+    if (reporterId) {
+      lines.push(`reporter: ${reporterId}`);
     }
     lines.push(`sampledAt: ${escapeHtml(sampledText)}`);
     if (renderMode) {
@@ -1970,6 +1982,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkPayloadById.delete(chunkId);
         battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
       }
@@ -1988,6 +2001,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (existing) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkPayloadById.delete(chunkId);
         battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
       }
@@ -2024,6 +2038,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
         }
         battleChunkGeometryMemoById.set(chunkId, geometryMemo);
         battleChunkRenderMemoById.set(chunkId, visualMemo);
+        battleChunkPayloadById.set(chunkId, { ...payload });
         if (visualChanged) {
           renderCounters.battleChunkVisualUpdates += 1;
         } else if (geometryChanged) {
@@ -2033,6 +2048,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       } catch (_) {
         try { existing.remove(); } catch (_) {}
         battleChunkLayersById.delete(chunkId);
+        battleChunkPayloadById.delete(chunkId);
         battleChunkGeometryMemoById.delete(chunkId);
         battleChunkRenderMemoById.delete(chunkId);
         renderCounters.battleChunkRecreates += 1;
@@ -2045,6 +2061,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     }
     layer.addTo(map);
     battleChunkLayersById.set(chunkId, layer);
+    battleChunkPayloadById.set(chunkId, { ...payload });
     battleChunkGeometryMemoById.set(chunkId, geometryMemo);
     battleChunkRenderMemoById.set(chunkId, visualMemo);
   }
@@ -2075,6 +2092,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       if (nextIds.has(chunkId)) continue;
       try { layer.remove(); } catch (_) {}
       battleChunkLayersById.delete(chunkId);
+      battleChunkPayloadById.delete(chunkId);
       battleChunkGeometryMemoById.delete(chunkId);
       battleChunkRenderMemoById.delete(chunkId);
     }
@@ -2085,6 +2103,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { layer.remove(); } catch (_) {}
     }
     battleChunkLayersById.clear();
+    battleChunkPayloadById.clear();
     battleChunkGeometryMemoById.clear();
     battleChunkRenderMemoById.clear();
   }
@@ -2425,6 +2444,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
       try { existing.remove(); } catch (_) {}
     }
     battleChunkLayersById.delete(chunkId);
+    battleChunkPayloadById.delete(chunkId);
     battleChunkGeometryMemoById.delete(chunkId);
     battleChunkRenderMemoById.delete(chunkId);
   }
@@ -2777,6 +2797,56 @@ export function createMapProjection(deps: MapProjectionDeps) {
     };
   }
 
+  function refreshBattleChunkDebugTooltips() {
+    if (!shouldShowBattleChunkDebug()) {
+      return;
+    }
+    for (const [chunkId, layer] of battleChunkLayersById.entries()) {
+      const payload = battleChunkPayloadById.get(chunkId);
+      if (!payload || typeof payload !== 'object' || typeof layer?.bindTooltip !== 'function') {
+        continue;
+      }
+      const battleChunkStyle = buildBattleChunkStyle(payload);
+      const renderMode = battleChunkStyle?.renderMode || '';
+      const tooltipHtml = buildBattleChunkTooltip(chunkId, { ...payload, renderMode });
+      try {
+        layer.bindTooltip(tooltipHtml, { sticky: true, direction: 'top', opacity: 0.95 });
+        battleChunkRenderMemoById.set(
+          chunkId,
+          buildBattleChunkVisualMemo(renderMode, battleChunkStyle?.style || {}, tooltipHtml),
+        );
+      } catch (_) {}
+    }
+  }
+
+  function getVisibleBattleChunkIds() {
+    const map = capturedMap || findMapByDom();
+    const centerWorld = map && typeof map.getCenter === 'function'
+      ? latLngToWorld(map, map.getCenter())
+      : null;
+    const centerChunkX = centerWorld ? centerWorld.x / 16 : 0;
+    const centerChunkZ = centerWorld ? centerWorld.z / 16 : 0;
+    return Array.from(battleChunkPayloadById.entries())
+      .map(([chunkId, payload]) => {
+        const chunkX = readNumber((payload as any)?.chunkX);
+        const chunkZ = readNumber((payload as any)?.chunkZ);
+        const distance = chunkX === null || chunkZ === null || !centerWorld
+          ? Number.POSITIVE_INFINITY
+          : Math.pow(chunkX - centerChunkX, 2) + Math.pow(chunkZ - centerChunkZ, 2);
+        return {
+          chunkId,
+          distance,
+        };
+      })
+      .sort((a, b) => {
+        if (a.distance !== b.distance) {
+          return a.distance - b.distance;
+        }
+        return a.chunkId.localeCompare(b.chunkId);
+      })
+      .map((item) => item.chunkId);
+  }
+
   function getDebugState() {
     const map = capturedMap || findMapByDom();
     const container = map && map._container instanceof HTMLElement ? map._container : null;
@@ -2871,7 +2941,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
     applyLatestSnapshotIfPossible,
     focusOnWorldPosition,
     getCounts,
+    getVisibleBattleChunkIds,
     getDebugState,
+    refreshBattleChunkDebugTooltips,
     cleanup,
   };
 }

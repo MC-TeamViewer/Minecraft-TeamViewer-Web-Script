@@ -164,6 +164,13 @@ function decodePatch(message: any): WebMapInboundPacket | null {
   };
 }
 
+function decodeBattleChunkMetaSnapshot(message: any): WebMapInboundPacket | null {
+  return {
+    type: 'battle_chunk_meta_snapshot',
+    battleChunks: decodeBattleChunkSnapshot(message.battleChunks),
+  };
+}
+
 export interface NetworkMessageCodec {
   encode(packet: WireEnvelope): ArrayBuffer;
   decode(payload: ArrayBuffer | Uint8Array | string): WebMapInboundPacket | null;
@@ -217,6 +224,8 @@ export class ProtobufNetworkMessageCodec implements NetworkMessageCodec {
         return decodeSnapshotFull(envelope.payload.value);
       case 'patch':
         return decodePatch(envelope.payload.value);
+      case 'battleChunkMetaSnapshot':
+        return decodeBattleChunkMetaSnapshot(envelope.payload.value);
       default:
         return null;
     }

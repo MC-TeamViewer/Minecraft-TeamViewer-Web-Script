@@ -8,6 +8,7 @@ import {
 } from '../utils/overlayUtils';
 import { normalizeDebugJsonValue } from '../utils/debugJson';
 import {
+  buildBattleChunkMetaRequest,
   WebMapSnapshot,
   buildWebMapHandshake,
   buildWebMapResyncRequest,
@@ -96,12 +97,16 @@ type WsDebugState = {
 };
 
 const DEBUG_HISTORY_LIMIT = 30;
+const BATTLE_CHUNK_META_REFRESH_MS = 5_000;
+const BATTLE_CHUNK_META_MAX_ITEMS = 256;
 
 type WsClientDeps = {
   getConfig: () => Record<string, any>;
   isDebugEnabled?: () => boolean;
   onSnapshotChanged: (snapshot: Snapshot, changeSet: SnapshotChangeSet) => void;
   onAckMessage: (payload: Record<string, any>) => void;
+  getVisibleBattleChunkIds?: () => string[];
+  onBattleChunkMetaChanged?: () => void;
   onWsStatusChanged: (payload: {
     wsConnected: boolean;
     lastErrorText: string | null;
@@ -136,6 +141,8 @@ export function createWebMapWsClient(deps: WsClientDeps) {
   let lastWebMapMessageAt = 0;
   let serverProtocolVersion: string | null = null;
   let latestSnapshot: Snapshot = createEmptyWebMapSnapshot();
+  let latestBattleChunkMeta: Record<string, any> = {};
+  let battleChunkMetaTimer: ReturnType<typeof setTimeout> | null = null;
   let debugState: WsDebugState = {
     history: [],
     lastInbound: null,
@@ -425,6 +432,61 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     });
   }
 
+  function clearBattleChunkMetaTimer() {
+    if (battleChunkMetaTimer !== null) {
+      try { clearTimeout(battleChunkMetaTimer); } catch (_) {}
+      battleChunkMetaTimer = null;
+    }
+  }
+
+  function pruneBattleChunkMetaCache() {
+    const activeChunkIds = latestSnapshot?.battleChunks && typeof latestSnapshot.battleChunks === 'object'
+      ? new Set(Object.keys(latestSnapshot.battleChunks))
+      : new Set<string>();
+    if (!activeChunkIds.size) {
+      latestBattleChunkMeta = {};
+      return;
+    }
+    latestBattleChunkMeta = Object.fromEntries(
+      Object.entries(latestBattleChunkMeta).filter(([chunkId]) => activeChunkIds.has(chunkId)),
+    );
+  }
+
+  function requestBattleChunkMetaSnapshot() {
+    if (!webMapWs || webMapWs.readyState !== WebSocket.OPEN || !wsConnected) {
+      return false;
+    }
+    const visibleChunkIds = typeof deps.getVisibleBattleChunkIds === 'function'
+      ? deps.getVisibleBattleChunkIds()
+      : [];
+    const orderedChunkIds = Array.isArray(visibleChunkIds)
+      ? visibleChunkIds.map((item) => String(item || '')).filter(Boolean).slice(0, BATTLE_CHUNK_META_MAX_ITEMS)
+      : [];
+    if (!orderedChunkIds.length) {
+      return false;
+    }
+    try {
+      webMapWs.send(messageCodec.encode(buildBattleChunkMetaRequest(orderedChunkIds)));
+      return true;
+    } catch (error) {
+      recordRuntimeError('send_battle_chunk_meta_request', error);
+      emitStatus();
+      return false;
+    }
+  }
+
+  function scheduleBattleChunkMetaRefresh(delayMs = BATTLE_CHUNK_META_REFRESH_MS) {
+    clearBattleChunkMetaTimer();
+    if (pageUnloading) {
+      return;
+    }
+    battleChunkMetaTimer = setTimeout(() => {
+      battleChunkMetaTimer = null;
+      requestBattleChunkMetaSnapshot();
+      scheduleBattleChunkMetaRefresh(BATTLE_CHUNK_META_REFRESH_MS);
+    }, delayMs);
+  }
+
   function scheduleReconnect() {
     if (pageUnloading || reconnectSuppressedByVersionIncompatibility) return;
     if (reconnectTimer !== null) return;
@@ -492,7 +554,23 @@ export function createWebMapWsClient(deps: WsClientDeps) {
         connections_count: Number.isFinite(message.connections_count) ? message.connections_count : 0,
         server_time: message.server_time,
       };
+      pruneBattleChunkMetaCache();
       return buildFullSnapshotChangeSet(latestSnapshot, decodeMs);
+    }
+
+    if (message.type === 'battle_chunk_meta_snapshot') {
+      const metaPatch = message.battleChunks && typeof message.battleChunks === 'object'
+        ? message.battleChunks
+        : {};
+      latestBattleChunkMeta = {
+        ...latestBattleChunkMeta,
+        ...metaPatch,
+      };
+      pruneBattleChunkMetaCache();
+      try {
+        deps.onBattleChunkMetaChanged?.();
+      } catch (_) {}
+      return null;
     }
 
     if (message.type !== 'patch') {
@@ -518,6 +596,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     latestSnapshot.waypoints = applyScopePatchMap(latestSnapshot.waypoints, message.waypoints);
     latestSnapshot.battleChunks = applyScopePatchMap(latestSnapshot.battleChunks, message.battleChunks, ['chunkX', 'chunkZ', 'dimension', 'colorRaw']);
     latestSnapshot.playerMarks = applyScopePatchMap(latestSnapshot.playerMarks, message.playerMarks);
+    pruneBattleChunkMetaCache();
 
     const meta = (message.meta && typeof message.meta === 'object') ? message.meta : {};
     const metaTabState = (meta as Record<string, unknown>).tabState;
@@ -603,6 +682,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     if (options.manualClose) {
       manualWsClose = true;
     }
+    clearBattleChunkMetaTimer();
     if (webMapWs) {
       webMapWs.onopen = null;
       webMapWs.onmessage = null;
@@ -700,6 +780,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     reconnectSuppressedByVersionIncompatibility = false;
     wsConnected = false;
     serverProtocolVersion = null;
+    latestBattleChunkMeta = {};
 
     const config = deps.getConfig();
 
@@ -796,6 +877,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
 
           wsConnected = true;
           lastErrorText = null;
+          scheduleBattleChunkMetaRefresh(600);
           emitStatus();
           return;
         }
@@ -844,6 +926,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     ws.onclose = (event) => {
       wsConnected = false;
       webMapWs = null;
+      clearBattleChunkMetaTimer();
       recordCloseEvent(event);
       if (!manualWsClose && !pageUnloading && !reconnectSuppressedByVersionIncompatibility) {
         scheduleReconnect();
@@ -861,6 +944,10 @@ export function createWebMapWsClient(deps: WsClientDeps) {
 
   function getSnapshot() {
     return latestSnapshot;
+  }
+
+  function getBattleChunkMeta(chunkId: string) {
+    return latestBattleChunkMeta[String(chunkId || '')] || null;
   }
 
   function getStatus() {
@@ -916,6 +1003,7 @@ export function createWebMapWsClient(deps: WsClientDeps) {
     requestResync,
     isWsOpen,
     getSnapshot,
+    getBattleChunkMeta,
     getStatus,
     getDebugState,
     clearDebugHistory,

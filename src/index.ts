@@ -789,6 +789,7 @@ import { createSettingsUi } from './ui/settingsUi';
     getConfiguredTeamColor: (team) => getConfiguredTeamColor(team, CONFIG),
     maybeSyncAutoDetectedMarks: autoMarkSync.maybeSyncAutoDetectedMarks,
     getLatestPlayerMarks: () => latestPlayerMarks,
+    getBattleChunkMeta: (chunkId) => wsClient?.getBattleChunkMeta(chunkId),
     getWsConnected: () => wsConnected,
     isDebugEnabled: () => isDebugPanelEnabled(),
     onCreateTacticalWaypoint: (payload) => {
@@ -1638,6 +1639,10 @@ import { createSettingsUi } from './ui/settingsUi';
     wsClient = createWebMapWsClient({
       getConfig: () => CONFIG,
       isDebugEnabled: () => isDebugPanelEnabled(),
+      getVisibleBattleChunkIds: () => mapProjection.getVisibleBattleChunkIds(),
+      onBattleChunkMetaChanged: () => {
+        mapProjection.refreshBattleChunkDebugTooltips();
+      },
       onSnapshotChanged: (snapshot, changeSet) => {
         latestSnapshot = snapshot;
         sameServerFilterEnabled = Boolean(snapshot?.tabState?.enabled);
