@@ -1,7 +1,7 @@
 export const USERSCRIPT_META = {
   name: 'TeamViewRelay 地图投影-squaremap版',
   namespace: 'team-view-relay',
-  version: '0.4.9',
+  version: '0.4.10',
   description: '将 TeamViewRelay 的远程玩家与战局区块信息投影到 squaremap 地图',
   author: 'Prof. Chen',
   license: 'MIT',
@@ -12,6 +12,8 @@ export const USERSCRIPT_META = {
     'http://map.nodemc.cc/*',
     'https://map.fltown.cn/*',
     'http://map.fltown.cn/*',
+    'https://map.simmc.cn/*',
+    'http://map.simmc.cn/*',
   ] as const,
   'run-at': 'document-start' as const,
   'inject-into': 'page' as const,

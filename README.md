@@ -126,6 +126,17 @@ pnpm build
 pnpm proto:generate
 ```
 
+构建前置依赖：
+
+- `buf` CLI 用于从 `third_party/TeamViewRelay-Protocol` 生成 TypeScript 协议代码
+- 如果本机没有 `buf`，可执行：
+
+```bash
+mkdir -p /tmp/buf/bin && GOBIN=/tmp/buf/bin go install github.com/bufbuild/buf/cmd/buf@v1.46.0
+```
+
+- 脚本会优先使用 `/tmp/buf/bin/buf`，也可以自行设置 `BUF_BIN=/your/path/to/buf`
+
 关键目录：
 
 - `src/index.ts`：脚本主入口

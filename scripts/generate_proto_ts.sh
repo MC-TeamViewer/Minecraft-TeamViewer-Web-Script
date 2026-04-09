@@ -19,6 +19,9 @@ fi
 
 if [[ -z "${BUF_BIN:-}" || ! -x "$BUF_BIN" ]]; then
   echo "buf binary not found: ${BUF_BIN_RAW}" >&2
+  echo "install it and retry, for example:" >&2
+  echo "  mkdir -p /tmp/buf/bin && GOBIN=/tmp/buf/bin go install github.com/bufbuild/buf/cmd/buf@v1.46.0" >&2
+  echo "or set BUF_BIN to an existing buf binary path." >&2
   exit 1
 fi
 
