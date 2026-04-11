@@ -89,6 +89,7 @@ export type BattleChunkData = {
   roomCode?: string | null;
   colorMode?: string | null;
   colorSemanticKey?: string | null;
+  mode?: string | null;
   observedAt?: number | null;
   positionSampledAt?: number | null;
   alignmentSource?: string | null;
@@ -150,6 +151,24 @@ export const WAYPOINT_DATA_RELIABILITY: Record<string, boolean> = {
   permanent: true,
   tacticalType: true,
   sourceType: true,
+};
+
+export const BATTLE_CHUNK_DATA_RELIABILITY: Record<string, boolean> = {
+  chunkX: true,
+  chunkZ: true,
+  dimension: true,
+  symbol: true,
+  markerType: true,
+  colorRaw: true,
+  colorNote: true,
+  roomCode: true,
+  colorMode: true,
+  colorSemanticKey: true,
+  mode: true,
+  observedAt: true,
+  positionSampledAt: true,
+  alignmentSource: true,
+  reporterId: true,
 };
 
 export type PlayerNode = {

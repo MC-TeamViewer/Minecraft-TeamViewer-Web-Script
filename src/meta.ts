@@ -1,7 +1,7 @@
 export const USERSCRIPT_META = {
   name: 'TeamViewRelay 地图投影-squaremap版',
   namespace: 'team-view-relay',
-  version: '0.4.10',
+  version: '0.4.11',
   description: '将 TeamViewRelay 的远程玩家与战局区块信息投影到 squaremap 地图',
   author: 'Prof. Chen',
   license: 'MIT',
@@ -21,7 +21,7 @@ export const USERSCRIPT_META = {
 };
 
 export const PROTOCOL_META = {
-  adminNetworkProtocolVersion: '0.6.1',
+  adminNetworkProtocolVersion: '0.6.2',
   adminMinCompatibleNetworkProtocolVersion: '0.6.1',
 };
 

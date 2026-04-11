@@ -1308,6 +1308,7 @@ export function createMapProjection(deps: MapProjectionDeps) {
     const markerType = escapeHtml(String(effectivePayload?.markerType || '').trim() || '');
     const colorRaw = escapeHtml(String(effectivePayload?.colorRaw || '').trim() || '-');
     const colorNote = escapeHtml(String(effectivePayload?.colorNote || '').trim() || '');
+    const mode = escapeHtml(String(effectivePayload?.mode || '').trim() || '');
     const dimension = escapeHtml(String(effectivePayload?.dimension || '').trim() || '');
     const chunkX = Number(effectivePayload?.chunkX);
     const chunkZ = Number(effectivePayload?.chunkZ);
@@ -1329,6 +1330,9 @@ export function createMapProjection(deps: MapProjectionDeps) {
     }
     if (colorNote) {
       lines.push(`note: ${colorNote}`);
+    }
+    if (mode) {
+      lines.push(`mode: ${mode}`);
     }
     if (dimension) {
       lines.push(`dim: ${dimension}`);
